@@ -1,0 +1,13 @@
+name: Battleground
+version: 1.0
+main: me.test.project.pluginso1.Main
+api-version: 1.20
+description: Plugin Battleground sinh tồn
+commands:
+  bg:
+    description: Quản lý Battleground
+    usage: /<command> [join|leave|settime|start|stop|border [size|set <size>]]
+permissions:
+  battleground.admin:
+    description: Cho phép quản lý Battleground
+    default: op
