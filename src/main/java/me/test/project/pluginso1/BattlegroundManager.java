@@ -322,11 +322,13 @@ public class BattlegroundManager {
 
                 for (Player p : participants) {
                     if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
-                        p.damage(200.0); // Gây 1 trái tim sát thương mỗi lần
+                        p.damage(200.0); // Sát thương player chịu khi border biến mất hoàn toàn
                     }
                 }
             }
         }.runTaskTimer(plugin, 0L, 20L); // Gây sát thương mỗi giây
+
+        Bukkit.broadcastMessage(ChatColor.RED+"Cảnh Báo : Toàn bộ vòng bo đã biến mất!");
     }
 
     public void stop() {
@@ -396,7 +398,7 @@ public class BattlegroundManager {
         border.setSize(0, 1L);
 
         // Thông báo
-        Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã bị force thu về 0!");
+        Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã thu về 0!");
         plugin.getLogger().info("Border was force shrunk to 0");
     }
 
