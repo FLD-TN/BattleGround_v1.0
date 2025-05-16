@@ -145,17 +145,33 @@ public class BattlegroundCommand implements CommandExecutor {
                 }
                 try {
                     double size = Double.parseDouble(args[2]);
-                    if (size <= 0) {
-                        sender.sendMessage(ChatColor.RED + "Kích thước phải là số dương!");
-                        return true;
-                    }
+                    // if (size <= 0) {
+                    //     sender.sendMessage(ChatColor.RED + "Kích thước phải là số dương!");
+                    //     return true;
+                    // }
                     bgManager.setBorderSize(size);
                     sender.sendMessage(ChatColor.GREEN + "Đã đặt kích thước border thành " + (int) size + " block (khu vực: " + (int) size + "x" + (int) size + " block)");
                 } catch (NumberFormatException e) {
                     sender.sendMessage(ChatColor.RED + "Kích thước phải là số!");
                 }
+            } else if (args[1].equalsIgnoreCase("end")) {
+                // Kiểm tra quyền admin
+                if (!sender.hasPermission("battleground.admin")) {
+                    sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
+                    return true;
+                }
+
+                // Kiểm tra game có đang chạy không
+                if (!bgManager.isRunning()) {
+                    sender.sendMessage(ChatColor.RED + "Không có trận đấu nào đang diễn ra!");
+                    return true;
+                }
+
+                bgManager.forceShrinkBorder();
+                sender.sendMessage(ChatColor.GREEN + "Đã force thu nhỏ border về 0!");
+                return true;
             } else {
-                sender.sendMessage(ChatColor.RED + "Dùng: /bg border [size|set <size>]");
+                sender.sendMessage(ChatColor.RED + "Dùng: /bg border [size|set <size>|end]");
             }
         } else {
             sender.sendMessage(ChatColor.YELLOW + "Dùng: /bg [join|leave|settime|start [duration]|stop|border]");

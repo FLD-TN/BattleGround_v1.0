@@ -169,13 +169,16 @@ public class BattlegroundManager {
             return;
         }
 
+        // Trong phương thức startMatch(), thay đổi phần thiết lập border:
         World world = mapCenter.getWorld();
         border = world.getWorldBorder();
         border.reset();
         border.setCenter(mapCenter);
         border.setSize(borderInitialSize);
-        border.setDamageAmount(5.0);
-        border.setWarningDistance(3);
+        border.setDamageAmount(1.0);    // Tăng sát thương lên 2 hearts/giây
+        border.setDamageBuffer(0.0);    // Không có buffer, gây sát thương ngay khi ra khỏi border
+        border.setWarningDistance(1);    // Giữ nguyên
+        border.setWarningTime(0);        // Giữ nguyên
         plugin.getLogger().info("Border set to initial size: " + borderInitialSize);
 
         // Teleport và thiết lập người chơi
@@ -203,45 +206,36 @@ public class BattlegroundManager {
         }.runTaskLater(plugin, invincibilityDuration * 20L);
 
         // Thu nhỏ border
-        int mainPhases = 4; // 4 giai đoạn chính (80% đầu)
-        int finalPhases = 4; // 4 giai đoạn cuối (20% còn lại)
-        double shrinkAmount = borderInitialSize / 5; // Số block giảm mỗi lần (1/5 của kích thước ban đầu)
-        long mainTimePerPhase = (matchDuration * 20L * 4) / (5 * mainPhases); // 80% thời gian chia đều
-        long finalTimePerPhase = (matchDuration * 20L) / (5 * finalPhases); // 20% thời gian còn lại chia đều
-        double minimumSize = 5.0; // Kích thước nhỏ nhất cho phép
+        // Tính toán thời gian cho các giai đoạn (tính bằng ticks)
+        long mainPhases = 4; // 80% thời gian đầu chia làm 4 giai đoạn
+        long mainTimePerPhase = (matchDuration * 20L) / mainPhases; // Chuyển seconds thành ticks (20 ticks = 1 second)
+        
+        long finalPhases = 4; // Giai đoạn cuối chia làm 4 phần
+        long finalTimePerPhase = 40L; // 2 giây mỗi lần thu nhỏ ở giai đoạn cuối
 
+        // Giai đoạn chính (80% đầu)
         new BukkitRunnable() {
             int phase = 0;
             double currentSize = borderInitialSize;
-            boolean isInFinalPhase = false;
 
             @Override
             public void run() {
-                if (!isInFinalPhase) {
-                    // Giai đoạn chính (80% đầu)
-                    phase++;
-                    if (phase <= mainPhases) {
-                        currentSize = borderInitialSize - (shrinkAmount * phase);
-                        // Thu nhỏ border trong 3 giây
-                        border.setSize(currentSize, 60L);
-                        
-                        String message = ChatColor.YELLOW + "Border đang thu hẹp!\n" +
-                                ChatColor.WHITE + "• Kích thước mới: " + String.format("%.1f", currentSize) + "\n" +
-                                ChatColor.WHITE + "• Đã giảm: " + String.format("%.1f", shrinkAmount) + " blocks\n" +
-                                ChatColor.WHITE + "• Đã qua: " + (phase * 20) + "% thời gian";
-                        
-                        Bukkit.broadcastMessage(message);
-                        plugin.getLogger().info("Border phase " + phase + "/" + mainPhases + 
-                                ": size=" + String.format("%.1f", currentSize));
+                phase++;
+                if (phase <= mainPhases) {
+                    currentSize = borderInitialSize - ((borderInitialSize * 0.2) * phase);
+                    border.setSize(currentSize, 40L);
+                    
+                    String message = ChatColor.GOLD + "Border đang thu nhỏ!\n" +
+                            ChatColor.WHITE + "• Kích thước mới: " + String.format("%.1f", currentSize) + "\n" +
+                            ChatColor.WHITE + "• Còn " + (mainPhases - phase) + " lần thu nhỏ chính";
+                    
+                    Bukkit.broadcastMessage(message);
+                    plugin.getLogger().info("Phase " + phase + "/" + mainPhases + 
+                            ": size=" + String.format("%.1f", currentSize));
 
-                        if (phase == mainPhases) {
-                            // Chuyển sang giai đoạn cuối
-                            isInFinalPhase = true;
-                            phase = 0;
-                            // Hủy task hiện tại và tạo task mới với thời gian khác
-                            cancel();
-                            startFinalPhases(currentSize, finalPhases, finalTimePerPhase);
-                        }
+                    if (phase == mainPhases) {
+                        cancel();
+                        startFinalPhases(currentSize);
                     }
                 }
             }
@@ -278,40 +272,61 @@ public class BattlegroundManager {
         }.runTaskTimer(plugin, 0L, 20L);
     }
 
-    private void startFinalPhases(double startSize, int phases, long timePerPhase) {
-        // Tính toán để giảm từ từ về 5 blocks
-        double totalShrink = startSize - 5.0;
-        double shrinkPerPhase = totalShrink / phases;
-
+    private void startFinalPhases(double startSize) {
+        long timePerPhase = 40L; // 2 seconds
+        
         new BukkitRunnable() {
             int phase = 0;
             double currentSize = startSize;
+            double shrinkAmount = startSize / 4;
 
             @Override
             public void run() {
                 phase++;
-                if (phase <= phases) {
-                    currentSize = Math.max(5.0, startSize - (shrinkPerPhase * phase));
-                    // Thu nhỏ border trong 2 giây
-                    border.setSize(currentSize, 40L);
+                if (phase <= 4) {
+                    currentSize = startSize - (shrinkAmount * phase);
+                    if (currentSize < 0) currentSize = 0;
                     
-                    String message = ChatColor.GOLD + "Border đang trong giai đoạn thu nhỏ cuối!\n" +
+                    border.setSize(currentSize, timePerPhase);
+                    
+                    String message = ChatColor.RED + "CẢNH BÁO: Giai đoạn cuối!\n" +
                             ChatColor.WHITE + "• Kích thước mới: " + String.format("%.1f", currentSize) + "\n" +
-                            ChatColor.WHITE + "• Còn " + (phases - phase) + " lần thu nhỏ nữa\n" +
-                            ChatColor.WHITE + "• Sắp kết thúc trận đấu!";
+                            ChatColor.WHITE + "• Còn " + (4 - phase) + " lần thu nhỏ\n" +
+                            ChatColor.WHITE + "• Border sắp biến mất!";
                     
                     Bukkit.broadcastMessage(message);
-                    plugin.getLogger().info("Final phase " + phase + "/" + phases + 
-                            ": size=" + String.format("%.1f", currentSize));
-
-                    if (phase == phases) {
-                        Bukkit.broadcastMessage(ChatColor.RED + "Border đã đạt kích thước cuối cùng: 5x5!");
-                        plugin.getLogger().info("Border shrinking completed. Final size: 5x5");
+                    
+                    if (phase == 4) {
+                        // Xóa border và bắt đầu gây sát thương toàn map
+                        border.reset();
+                        border = null;
+                        startGlobalDamage();
+                        Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã biến mất!\n" + 
+                                          ChatColor.RED + "Toàn bộ khu vực sẽ gây sát thương!");
                         cancel();
                     }
                 }
             }
         }.runTaskTimer(plugin, timePerPhase, timePerPhase);
+    }
+
+    // Thêm phương thức mới để gây sát thương toàn map
+    private void startGlobalDamage() {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!isRunning) {
+                    cancel();
+                    return;
+                }
+
+                for (Player p : participants) {
+                    if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
+                        p.damage(200.0); // Gây 1 trái tim sát thương mỗi lần
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 20L); // Gây sát thương mỗi giây
     }
 
     public void stop() {
@@ -325,7 +340,14 @@ public class BattlegroundManager {
             border.reset();
             border = null;
         }
-
+        
+        // Reset các trạng thái và hủy tất cả các task
+        for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
+            if (task.getOwner().equals(plugin)) {
+                task.cancel();
+            }
+        }
+        
         // Tự động cho tất cả người chơi leave BG
         List<Player> playersToRemove = new ArrayList<>(participants);
         for (Player p : playersToRemove) {
@@ -360,6 +382,22 @@ public class BattlegroundManager {
         }
         this.border = null;
         plugin.getLogger().info("All world borders have been reset");
+    }
+
+    public void forceShrinkBorder() {
+        if (!isRunning || border == null) {
+            return;
+        }
+
+        // Reset border hiện tại
+        border.reset();
+        border.setCenter(mapCenter);
+        // Set border về 0 ngay lập tức
+        border.setSize(0, 1L);
+
+        // Thông báo
+        Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã bị force thu về 0!");
+        plugin.getLogger().info("Border was force shrunk to 0");
     }
 
     public boolean isRunning() {
