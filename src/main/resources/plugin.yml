@@ -1,13 +1,25 @@
-name: Battleground
-version: 1.0
+name: BattleGround
+version: "1.0"
 main: me.test.project.pluginso1.Main
 api-version: 1.20
 description: Plugin Battleground sinh tồn
+depend: [WorldGuard]
+
 commands:
   bg:
-    description: Quản lý Battleground
+    description: Quan ly Battleground
     usage: /<command> [join|leave|settime|start|stop|border [size|set <size>]]
+
 permissions:
+  battleground.*:
+    description: Gives access to all battleground commands and features
+    default: op
+    children:
+      battleground.admin: true
+      battleground.access: true
+  battleground.access:
+    description: Cho phep nguoi choi vao khu vuc battleground
+    default: false
   battleground.admin:
-    description: Cho phép quản lý Battleground
+    description: Quyen admin cua plugin
     default: op

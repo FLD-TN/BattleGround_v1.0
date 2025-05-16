@@ -1,6 +1,8 @@
 me\test\project\pluginso1\BattlegroundManager$2.class
+me\test\project\pluginso1\listeners\TeleportListener.class
 me\test\project\pluginso1\listeners\DeathListener.class
 me\test\project\pluginso1\BattlegroundManager$7.class
+me\test\project\pluginso1\listeners\WorldListener.class
 me\test\project\pluginso1\BattlegroundManager$3.class
 me\test\project\pluginso1\commands\BattlegroundCommand.class
 me\test\project\pluginso1\listeners\PlayerListener.class

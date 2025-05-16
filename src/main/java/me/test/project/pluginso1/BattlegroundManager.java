@@ -1,15 +1,16 @@
 package me.test.project.pluginso1;
-import org.apache.logging.log4j.message.Message;
+
 import org.bukkit.*;
 import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class BattlegroundManager {
-    private final Main plugin;
+public class BattlegroundManager {    private final Main plugin;
     private final List<Player> participants = new ArrayList<>();
     private boolean isRunning = false;
     private long startTime = -1;
@@ -22,18 +23,15 @@ public class BattlegroundManager {
     private int invincibilityDuration;
     private double borderInitialSize;
     private double borderFinalSize;
-    private int minPlayers;
-
-    public BattlegroundManager(Main plugin) {
+    private int minPlayers;    public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
         loadConfig();
         scheduleStartCheck();
     }
 
     private void loadConfig() {
-        try {
-            lobbyLocation = parseLocation(plugin.getConfig().getString("lobby-location"));
-            mapCenter = parseLocation(plugin.getConfig().getString("map-center"));
+        try {            lobbyLocation = parseConfigLocation("lobby-location");
+            mapCenter = parseConfigLocation("map-center");
             matchDuration = plugin.getConfig().getInt("match-duration", 1800);
             invincibilityDuration = plugin.getConfig().getInt("invincibility-duration", 60);
             borderInitialSize = plugin.getConfig().getDouble("border-initial-size", 200.0);
@@ -49,15 +47,18 @@ public class BattlegroundManager {
             e.printStackTrace();
             borderInitialSize = 200.0; // Giá trị mặc định nếu lỗi
         }
-    }
-
-    private Location parseLocation(String loc) {
-        String[] parts = loc.split(",");
+    }    private Location parseConfigLocation(String path) {
+        String worldName = plugin.getConfig().getString(path + ".world", "newbox");
+        World world = Bukkit.getWorld(worldName);
+        if (world == null) {
+            plugin.getLogger().warning("World '" + worldName + "' not found for " + path);
+            world = Bukkit.getWorlds().get(0); // Fallback to default world
+        }
         return new Location(
-                Bukkit.getWorld(parts[0]),
-                Double.parseDouble(parts[1]),
-                Double.parseDouble(parts[2]),
-                Double.parseDouble(parts[3])
+            world,
+            plugin.getConfig().getDouble(path + ".x", 0),
+            plugin.getConfig().getDouble(path + ".y", 100),
+            plugin.getConfig().getDouble(path + ".z", 0)
         );
     }
 
@@ -76,21 +77,28 @@ public class BattlegroundManager {
 
     public void registerPlayer(Player player) {
         if (!isRunning && !participants.contains(player)) {
-            participants.add(player);
-            player.sendMessage(ChatColor.GREEN + "Bạn đã đăng ký Battleground!");
+            participants.add(player);            // Add player to global region using command
+            String addCommand = "rg addmember -w newbox __global__ " + player.getName();
+            boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), addCommand);
+            plugin.getLogger().info("Executing command: " + addCommand + " (success: " + success + ")");
+            
+            player.sendMessage(ChatColor.GREEN + "Bạn đã tham gia Battleground!");
             Bukkit.broadcastMessage(ChatColor.YELLOW + "Hiện có " + participants.size() + "/" + minPlayers + " người tham gia.");
             plugin.getLogger().info("Player " + player.getName() + " registered. Participants: " + participants.size());
         } else {
             player.sendMessage(ChatColor.RED + "Bạn đã đăng ký hoặc trận đã bắt đầu!");
         }
-    }
-
-    public void unregisterPlayer(Player player) {
-        if (participants.remove(player)) {
+    }    public void unregisterPlayer(Player player) {
+        if (participants.remove(player)) {            // Remove player from global region using command
+            String removeCommand = "rg removemember -w newbox __global__ " + player.getName();
+            boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), removeCommand);
+            plugin.getLogger().info("Executing command: " + removeCommand + " (success: " + success + ")");
+            
+            // Reset GameMode trước khi teleport
             player.setGameMode(GameMode.SURVIVAL);
             player.teleport(Bukkit.getWorld("world").getSpawnLocation());
-            player.sendMessage(ChatColor.GREEN + "Bạn đã rời khỏi Battleground!");
-            plugin.getLogger().info("Player " + player.getName() + " unregistered.");
+            player.sendMessage(ChatColor.YELLOW + "Bạn đã rời khỏi Battleground!");
+            plugin.getLogger().info("Player " + player.getName() + " unregistered and reset to survival mode");
         }
     }
 
@@ -131,7 +139,6 @@ public class BattlegroundManager {
         for (Player p : participants) {
             if (p.isOnline()) {
                 p.teleport(lobbyLocation);
-                p.setGameMode(GameMode.ADVENTURE);
                 p.sendMessage(ChatColor.YELLOW + "Chờ đếm ngược để bắt đầu!");
             }
         }
@@ -150,6 +157,13 @@ public class BattlegroundManager {
                     Bukkit.broadcastMessage(ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
                     countdown--;
                 } else {
+                    // Thêm effect slow falling khi countdown kết thúc
+                    for (Player p : participants) {
+                        if (p.isOnline()) {
+                            // Thêm effect slow falling level 1 trong 30 giây (20 ticks * 30 = 600 ticks)
+                            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 600, 0));
+                        }
+                    }
                     startMatch();
                     cancel();
                     plugin.getLogger().info("Countdown finished, match started");
@@ -175,7 +189,7 @@ public class BattlegroundManager {
         border.reset();
         border.setCenter(mapCenter);
         border.setSize(borderInitialSize);
-        border.setDamageAmount(1.0);    // Tăng sát thương lên 2 hearts/giây
+        border.setDamageAmount(7.0);    // Tăng sát thương lên 2 hearts/giây
         border.setDamageBuffer(0.0);    // Không có buffer, gây sát thương ngay khi ra khỏi border
         border.setWarningDistance(1);    // Giữ nguyên
         border.setWarningTime(0);        // Giữ nguyên
@@ -183,14 +197,14 @@ public class BattlegroundManager {
 
         // Teleport và thiết lập người chơi
         for (Player p : participants) {
-            if (p.isOnline()) {
+                // Xóa dòng thêm effect vì đã chuyển lên trên
                 p.teleport(mapCenter.clone().add(0, 10, 0));
                 p.setInvulnerable(true);
                 p.sendMessage(ChatColor.GREEN + "Bạn đã vào trận Battleground!");
                 p.sendMessage(ChatColor.YELLOW + "Border ban đầu: " + String.format("%.1f", borderInitialSize) + " blocks");
                 plugin.getLogger().info("Teleported " + p.getName() + " to match start location");
-            }
         }
+        
 
         // Hết thời gian bất tử
         new BukkitRunnable() {
@@ -209,9 +223,7 @@ public class BattlegroundManager {
         // Tính toán thời gian cho các giai đoạn (tính bằng ticks)
         long mainPhases = 4; // 80% thời gian đầu chia làm 4 giai đoạn
         long mainTimePerPhase = (matchDuration * 20L) / mainPhases; // Chuyển seconds thành ticks (20 ticks = 1 second)
-        
-        long finalPhases = 4; // Giai đoạn cuối chia làm 4 phần
-        long finalTimePerPhase = 40L; // 2 giây mỗi lần thu nhỏ ở giai đoạn cuối
+  
 
         // Giai đoạn chính (80% đầu)
         new BukkitRunnable() {
@@ -322,7 +334,7 @@ public class BattlegroundManager {
 
                 for (Player p : participants) {
                     if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
-                        p.damage(200.0); // Sát thương player chịu khi border biến mất hoàn toàn
+                        p.damage(150.0); // Sát thương player chịu khi border biến mất hoàn toàn
                     }
                 }
             }
@@ -343,25 +355,24 @@ public class BattlegroundManager {
             border = null;
         }
         
-        // Reset các trạng thái và hủy tất cả các task
+        // Reset all tasks
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
             }
         }
         
-        // Tự động cho tất cả người chơi leave BG
+        // Auto-leave all players and remove region access
         List<Player> playersToRemove = new ArrayList<>(participants);
         for (Player p : playersToRemove) {
             if (p.isOnline()) {
-                // Đưa về GameMode SURVIVAL cho mọi người chơi
                 p.setGameMode(GameMode.SURVIVAL);
-                unregisterPlayer(p);
+                unregisterPlayer(p); // This will also remove them from the region
                 p.sendMessage(ChatColor.GREEN + "Trận đấu đã kết thúc! Bạn đã được đưa về trạng thái bình thường.");
             }
         }
 
-        // Reset các trạng thái
+        // Reset states
         participants.clear();
         isRunning = false;
         startTime = -1;

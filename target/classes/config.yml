@@ -1,7 +1,21 @@
 # Vị trí sảnh chờ
-lobby-location: "newbox,70.525,173,83.487"
-# Vị trí trung tâm bản đồ (center của border)
-map-center: "newbox,70.525,173,83.487"
+war-location:
+  world: "newbox"
+  x: 70.525
+  y: 173
+  z: 83.487
+  
+lobby-location:
+  world: "newbox"
+  x: 70.525
+  y: 173
+  z: 83.487
+
+map-center:
+  world: "newbox"
+  x: 70.525
+  y: 173
+  z: 83.487
 # Thời gian miễn nhiễm sát thương khi bắt đầu (giây)
 invincibility-duration: 60
 # Số người chơi tối thiểu để bắt đầu
