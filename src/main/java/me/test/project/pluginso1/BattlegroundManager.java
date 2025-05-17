@@ -46,7 +46,8 @@ public class BattlegroundManager {
     private File killDataFile;
     private BukkitTask autoSaveTask;
     private boolean isCountingDown = false;
-    private final Map<Player, ItemStack[]> vanishedArmor = new HashMap<>(); // Store armor during vanish
+    private final Map<Player, ItemStack[]> vanishedArmor = new HashMap<>();
+    private boolean isJoinOpen = false; // New flag to control joining
 
     public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
@@ -114,6 +115,10 @@ public class BattlegroundManager {
     }
 
     public void registerPlayer(Player player) {
+        if (!isJoinOpen) {
+            player.sendMessage(ChatColor.RED + "Battleground chưa mở đăng ký! Vui lòng chờ admin mở bằng /bg open.");
+            return;
+        }
         if (!isRunning && !participants.contains(player)) {
             participants.add(player);
             String addCommand = "rg addmember -w newbox __global__ " + player.getName();
@@ -146,6 +151,22 @@ public class BattlegroundManager {
         }
     }
 
+    public void openJoin() {
+        isJoinOpen = true;
+        Bukkit.broadcastMessage(ChatColor.GREEN + "Battleground đã mở đăng ký! Sử dụng /bg join để tham gia.");
+        plugin.getLogger().info("Battleground join opened");
+    }
+
+    public void closeJoin() {
+        isJoinOpen = false;
+        Bukkit.broadcastMessage(ChatColor.RED + "Battleground đã đóng đăng ký! Không thể tham gia lúc này.");
+        plugin.getLogger().info("Battleground join closed");
+    }
+
+    public boolean isJoinOpen() {
+        return isJoinOpen;
+    }
+
     public void setStartTime(long seconds) {
         startTime = System.currentTimeMillis() / 1000 + seconds;
         Bukkit.broadcastMessage(ChatColor.YELLOW + "Battleground sẽ bắt đầu sau " + seconds + " giây!");
@@ -170,6 +191,7 @@ public class BattlegroundManager {
         }
         isRunning = true;
         isCountingDown = true;
+        isJoinOpen = false; // Close joining when match starts
         startTime = -1;
         kills.clear();
 
@@ -304,7 +326,6 @@ public class BattlegroundManager {
                 p.setInvulnerable(true);
                 p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                         + ChatColor.GREEN + "Bạn đã vào trận Battleground!");
-                // Apply effects immediately after countdown
                 p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
                 p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
                 plugin.getLogger().info("Teleported " + p.getName() + " to match start location and applied effects");
@@ -533,7 +554,7 @@ public class BattlegroundManager {
             }
         }
 
-        List<Player> playersToRemove = new ArrayList<>(participants);
+        List<Player> playersToRemove = new ArrayList<>(participants); // Fixed line
         for (Player p : playersToRemove) {
             if (p.isOnline()) {
                 p.setGameMode(GameMode.SURVIVAL);
@@ -558,6 +579,7 @@ public class BattlegroundManager {
         participants.clear();
         isRunning = false;
         isCountingDown = false;
+        isJoinOpen = false;
         startTime = -1;
         currentPhase = 0;
 
@@ -687,17 +709,14 @@ public class BattlegroundManager {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
         gameScoreboard = manager.getNewScoreboard();
 
-        // Unregister existing bginfo objective if it exists
         if (gameScoreboard.getObjective("bginfo") != null) {
             gameScoreboard.getObjective("bginfo").unregister();
         }
 
-        // Create the Battleground sidebar objective
         Objective objective = gameScoreboard.registerNewObjective("bginfo", Criteria.DUMMY,
                 ChatColor.GOLD + "♦ Battleground ♦");
         objective.setDisplaySlot(DisplaySlot.SIDEBAR);
 
-        // Copy teams to preserve nametags and tab list sorting
         Scoreboard mainScoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
         for (Team team : mainScoreboard.getTeams()) {
             Team newTeam = gameScoreboard.registerNewTeam(team.getName());
@@ -711,12 +730,10 @@ public class BattlegroundManager {
             }
         }
 
-        // Create health objective for nametags (BELOW_NAME) using DUMMY
         Objective nameHealthObj = gameScoreboard.registerNewObjective("name_health", Criteria.DUMMY,
                 ChatColor.RED + "❤");
         nameHealthObj.setDisplaySlot(DisplaySlot.BELOW_NAME);
 
-        // Initialize health scores for all participants
         for (Player p : participants) {
             if (p.isOnline()) {
                 int health = (int) Math.ceil(p.getHealth());
@@ -725,7 +742,6 @@ public class BattlegroundManager {
             }
         }
 
-        // Assign the new scoreboard to participants and save their original scoreboards
         for (Player p : participants) {
             if (!originalScoreboards.containsKey(p)) {
                 Scoreboard current = p.getScoreboard();
@@ -738,7 +754,6 @@ public class BattlegroundManager {
             p.setScoreboard(gameScoreboard);
         }
 
-        // Update name_health objective scores dynamically for real-time health display
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -750,14 +765,13 @@ public class BattlegroundManager {
                 if (healthObj != null) {
                     for (Player p : participants) {
                         if (p.isOnline()) {
-                            // Set the player's health score (rounded to nearest integer)
                             int health = (int) Math.ceil(p.getHealth());
                             healthObj.getScore(p.getName()).setScore(health);
                         }
                     }
                 }
             }
-        }.runTaskTimer(plugin, 20L, 5L); // Update every 5 ticks (0.25 seconds)
+        }.runTaskTimer(plugin, 20L, 5L);
     }
 
     private void resetPlayerScoreboard(Player player) {
@@ -1012,7 +1026,6 @@ public class BattlegroundManager {
 
         updateScoreboard();
 
-        killer.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 10 * 20, 2));
         killer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
     }
 

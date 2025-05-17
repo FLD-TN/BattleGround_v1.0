@@ -6,7 +6,6 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-import org.bukkit.command.TabCompleter;
 
 public class BattlegroundCommand implements CommandExecutor {
     private final BattlegroundManager bgManager;
@@ -17,13 +16,17 @@ public class BattlegroundCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 0) { // Thông tin chung cho tất cả người chơi
+        if (args.length == 0) {
             sender.sendMessage(ChatColor.GOLD + "✦ Battleground_v1.0 ✦");
-            sender.sendMessage(ChatColor.GRAY + "➥ Author: FLD-TN"); // Hiển thị lệnh dựa theo quyền
+            sender.sendMessage(ChatColor.GRAY + "➥ Author: FLD-TN");
             if (sender.hasPermission("battleground.admin") || sender.isOp()) {
                 sender.sendMessage(ChatColor.WHITE + "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg open" + ChatColor.GRAY
+                        + " - Mở đăng ký Battleground");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg close" + ChatColor.GRAY
+                        + " - Đóng đăng ký Battleground");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg join" + ChatColor.GRAY
-                        + " - đăng kí tham gia BattleGround");
+                        + " - Đăng ký tham gia Battleground");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW
                         + "/bg start <thời gian> <kích thước border>" + ChatColor.GRAY + " - Bắt đầu trận đấu");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg stop" + ChatColor.GRAY
@@ -65,7 +68,41 @@ public class BattlegroundCommand implements CommandExecutor {
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("join")) {
+        if (args[0].equalsIgnoreCase("open")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage(ChatColor.RED + "Chỉ người chơi dùng được lệnh này!");
+                return true;
+            }
+            Player player = (Player) sender;
+            if (!player.hasPermission("battleground.admin")) {
+                sender.sendMessage(ChatColor.RED + "Bạn không có quyền!");
+                return true;
+            }
+            if (bgManager.isJoinOpen()) {
+                sender.sendMessage(ChatColor.RED + "Battleground đã mở đăng ký rồi!");
+                return true;
+            }
+            bgManager.openJoin();
+            sender.sendMessage(ChatColor.GREEN + "Đã mở đăng ký Battleground!");
+            return true;
+        } else if (args[0].equalsIgnoreCase("close")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage(ChatColor.RED + "Chỉ người chơi dùng được lệnh này!");
+                return true;
+            }
+            Player player = (Player) sender;
+            if (!player.hasPermission("battleground.admin")) {
+                sender.sendMessage(ChatColor.RED + "Bạn không có quyền!");
+                return true;
+            }
+            if (!bgManager.isJoinOpen()) {
+                sender.sendMessage(ChatColor.RED + "Battleground đã đóng đăng ký rồi!");
+                return true;
+            }
+            bgManager.closeJoin();
+            sender.sendMessage(ChatColor.GREEN + "Đã đóng đăng ký Battleground!");
+            return true;
+        } else if (args[0].equalsIgnoreCase("join")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Chỉ người chơi dùng được lệnh này!");
                 return true;
@@ -116,7 +153,6 @@ public class BattlegroundCommand implements CommandExecutor {
             }
 
             try {
-                // Đặt thời gian trận đấu
                 int duration = Integer.parseInt(args[1]);
                 if (duration < 30) {
                     sender.sendMessage(ChatColor.RED + "Thời gian trận đấu phải ít nhất 30 giây!");
@@ -124,7 +160,6 @@ public class BattlegroundCommand implements CommandExecutor {
                 }
                 bgManager.setMatchDuration(duration);
 
-                // Đặt kích thước border
                 double borderSize = Double.parseDouble(args[2]);
                 if (borderSize < 50) {
                     sender.sendMessage(ChatColor.RED + "Kích thước border phải ít nhất 50 blocks!");
@@ -135,7 +170,8 @@ public class BattlegroundCommand implements CommandExecutor {
                 sender.sendMessage(ChatColor.GREEN + "Thiết lập trận đấu:");
                 sender.sendMessage(ChatColor.YELLOW + "• Thời gian: " + duration + " giây");
                 sender.sendMessage(ChatColor.YELLOW + "• Border ban đầu: " + borderSize + " blocks");
-                sender.sendMessage(ChatColor.YELLOW + "• Border sẽ thu nhỏ 20% mỗi " + (duration / 5) + " giây");
+                sender.sendMessage(
+                        ChatColor.YELLOW + "• Border sẽ thu nhỏ  podpis 20% mỗi " + (duration / 5) + " giây");
             } catch (NumberFormatException e) {
                 sender.sendMessage(ChatColor.RED + "Thời gian và kích thước border phải là số!");
                 return true;
@@ -202,10 +238,6 @@ public class BattlegroundCommand implements CommandExecutor {
                 }
                 try {
                     double size = Double.parseDouble(args[2]);
-                    // if (size <= 0) {
-                    // sender.sendMessage(ChatColor.RED + "Kích thước phải là số dương!");
-                    // return true;
-                    // }
                     bgManager.setBorderSize(size);
                     sender.sendMessage(ChatColor.GREEN + "Đã đặt kích thước border thành " + (int) size
                             + " block (khu vực: " + (int) size + "x" + (int) size + " block)");
@@ -235,13 +267,11 @@ public class BattlegroundCommand implements CommandExecutor {
                 }
                 return true;
             } else if (args[1].equalsIgnoreCase("end")) {
-                // Kiểm tra quyền admin
                 if (!sender.hasPermission("battleground.admin")) {
                     sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
                     return true;
                 }
 
-                // Kiểm tra game có đang chạy không
                 if (!bgManager.isRunning()) {
                     sender.sendMessage(ChatColor.RED + "Không có trận đấu nào đang diễn ra!");
                     return true;
