@@ -5,8 +5,9 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.entity.Player;
-import org.bukkit.potion.PotionEffectType;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.*;
@@ -33,35 +34,37 @@ public class BattlegroundManager {
     private double borderInitialSize;
     private double borderFinalSize;
     private int minPlayers;
-    private final Map<Player, Integer> kills = new HashMap<>(); // Kills trong trận hiện tại
-    private final Map<Player, Integer> totalKills = new HashMap<>(); // Tổng kills từ tất cả các trận
+    private final Map<Player, Integer> kills = new HashMap<>();
+    private final Map<Player, Integer> totalKills = new HashMap<>();
     private int currentPhase = 0;
     private boolean isPaused = false;
     private BukkitTask borderTask;
     private long matchStartTime;
     private BossBar borderBar;
     private Scoreboard gameScoreboard;
-    private Map<Player, Scoreboard> originalScoreboards = new HashMap<>(); // Lưu scoreboard cũ của mỗi người chơi
+    private Map<Player, Scoreboard> originalScoreboards = new HashMap<>();
     private File killDataFile;
     private BukkitTask autoSaveTask;
+    private boolean isCountingDown = false;
+    private final Map<Player, ItemStack[]> vanishedArmor = new HashMap<>(); // Store armor during vanish
 
     public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
         this.currentPhase = 0;
         this.killDataFile = new File(plugin.getDataFolder(), "kills.yml");
-        // Create plugin folder if it doesn't exist
         if (!plugin.getDataFolder().exists()) {
             plugin.getDataFolder().mkdirs();
         }
         loadConfig();
-        loadKillData(); // Load kill data when initializing
+        loadKillData();
         scheduleStartCheck();
         setupScoreboard();
-        startAutoSave(); // Start periodic auto-save
+        startAutoSave();
     }
 
     private void loadConfig() {
-        try {            lobbyLocation = parseConfigLocation("lobby-location");
+        try {
+            lobbyLocation = parseConfigLocation("lobby-location");
             mapCenter = parseConfigLocation("map-center");
             matchDuration = plugin.getConfig().getInt("match-duration", 1800);
             invincibilityDuration = plugin.getConfig().getInt("invincibility-duration", 60);
@@ -76,14 +79,16 @@ public class BattlegroundManager {
         } catch (Exception e) {
             plugin.getLogger().severe("Error loading config: " + e.getMessage());
             e.printStackTrace();
-            borderInitialSize = 200.0; // Giá trị mặc định nếu lỗi
+            borderInitialSize = 200.0;
         }
-    }    private Location parseConfigLocation(String path) {
+    }
+
+    private Location parseConfigLocation(String path) {
         String worldName = plugin.getConfig().getString(path + ".world", "newbox");
         World world = Bukkit.getWorld(worldName);
         if (world == null) {
             plugin.getLogger().warning("World '" + worldName + "' not found for " + path);
-            world = Bukkit.getWorlds().get(0); // Fallback to default world
+            world = Bukkit.getWorlds().get(0);
         }
         return new Location(
             world,
@@ -108,7 +113,7 @@ public class BattlegroundManager {
 
     public void registerPlayer(Player player) {
         if (!isRunning && !participants.contains(player)) {
-            participants.add(player);            // Add player to global region using command
+            participants.add(player);
             String addCommand = "rg addmember -w newbox __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), addCommand);
             plugin.getLogger().info("Executing command: " + addCommand + " (success: " + success + ")");
@@ -119,17 +124,22 @@ public class BattlegroundManager {
         } else {
             player.sendMessage(ChatColor.RED + "Bạn đã đăng ký hoặc trận đã bắt đầu!");
         }
-    }    public void unregisterPlayer(Player player) {
-        if (participants.remove(player)) {            // Remove player from global region using command
+    }
+
+    public void unregisterPlayer(Player player) {
+        if (participants.remove(player)) {
             String removeCommand = "rg removemember -w newbox __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), removeCommand);
             plugin.getLogger().info("Executing command: " + removeCommand + " (success: " + success + ")");
-              // Reset player state
             player.setGameMode(GameMode.SURVIVAL);
             resetPlayerScoreboard(player);
             player.teleport(Bukkit.getWorld("world").getSpawnLocation());
             player.sendMessage(ChatColor.YELLOW + "Bạn đã rời khỏi Battleground!");
             plugin.getLogger().info("Player " + player.getName() + " unregistered and reset to survival mode");
+            if (vanishedArmor.containsKey(player)) {
+                player.getInventory().setArmorContents(vanishedArmor.get(player));
+                vanishedArmor.remove(player);
+            }
         }
     }
 
@@ -153,10 +163,11 @@ public class BattlegroundManager {
         if (participants.size() < minPlayers) {
             Bukkit.broadcastMessage(ChatColor.RED + "Cần ít nhất " + minPlayers + " người để bắt đầu! Hiện có: " + participants.size());
             return;
-        }        isRunning = true;
+        }
+        isRunning = true;
+        isCountingDown = true;
         startTime = -1;
-        kills.clear(); // Reset kills for new match
-        matchStartTime = System.currentTimeMillis() / 1000; // Set match start time
+        kills.clear();
 
         String participantNames = participants.stream().map(Player::getName).collect(Collectors.joining(", "));
         plugin.getLogger().info("Starting Battleground with " + participants.size() + " participants: " + participantNames);
@@ -173,9 +184,8 @@ public class BattlegroundManager {
                 p.teleport(lobbyLocation);
                 p.sendMessage(ChatColor.YELLOW + "Chờ đếm ngược để bắt đầu!");
             }
-        }        // Setup scoreboard right away
+        }
         setupScoreboard();
-        updateScoreboard();
 
         if (countdownTask != null && !countdownTask.isCancelled()) {
             countdownTask.cancel();
@@ -189,23 +199,37 @@ public class BattlegroundManager {
             public void run() {
                 if (countdown > 0) {
                     Bukkit.broadcastMessage(ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
+                    updateCountdownScoreboard(countdown);
                     countdown--;
-                    // Update scoreboard countdown
-                    updateScoreboard();
                 } else {
-                    // Thêm effect slow falling khi countdown kết thúc
-                    for (Player p : participants) {
-                        if (p.isOnline()) {
-                            // Thêm effect slow falling level 1 trong 30 giây (20 ticks * 30 = 600 ticks)
-                            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 600, 0));
-                        }
-                    }
+                    isCountingDown = false;
                     startMatch();
                     cancel();
                     plugin.getLogger().info("Countdown finished, match started");
                 }
             }
         }.runTaskTimer(plugin, 0L, 20L);
+    }
+
+    private void updateCountdownScoreboard(int countdown) {
+        Objective objective = gameScoreboard.getObjective("bginfo");
+        if (objective != null) {
+            objective.unregister();
+        }
+        objective = gameScoreboard.registerNewObjective("bginfo", Criteria.DUMMY, ChatColor.GOLD + "♦ Battleground ♦");
+        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+
+        int score = 15;
+        objective.getScore(ChatColor.YELLOW + "Starting in: " + formatTime(countdown)).setScore(score--);
+        objective.getScore("").setScore(score--);
+        objective.getScore(ChatColor.WHITE + "⚔ Players:").setScore(score--);
+        objective.getScore(ChatColor.GREEN + " ▸ Total: " + participants.size()).setScore(score--);
+
+        for (Player p : participants) {
+            if (p.isOnline()) {
+                p.setScoreboard(gameScoreboard);
+            }
+        }
     }
 
     public void setInitialBorderSize(double size) {
@@ -217,25 +241,23 @@ public class BattlegroundManager {
         if (!isRunning) {
             plugin.getLogger().warning("startMatch called while match is not running, ignoring");
             return;
-        }        // Setup border
+        }
+        matchStartTime = System.currentTimeMillis() / 1000;
         World world = mapCenter.getWorld();
         border = world.getWorldBorder();
         border.reset();
         border.setCenter(mapCenter);
         border.setSize(borderInitialSize);
-        border.setDamageAmount(7.0);    // Tăng sát thương lên 2 hearts/giây
-        border.setDamageBuffer(0.0);    // Không có buffer, gây sát thương ngay khi ra khỏi border
-        border.setWarningDistance(1);    // Giữ nguyên
-        border.setWarningTime(0);        // Giữ nguyên
+        border.setDamageAmount(7.0);
+        border.setDamageBuffer(0.0);
+        border.setWarningDistance(1);
+        border.setWarningTime(0);
         plugin.getLogger().info("Border set to initial size: " + borderInitialSize);
         
-        // Create and show border effects
         createBorderBar();
         updateBorderBar();
-        showBorderParticles();        // Set up scoreboard and start update timer for scoreboard and bossbar
-        setupScoreboard();
+        showBorderParticles();
         updateScoreboard();
-        createBorderBar();
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -246,25 +268,22 @@ public class BattlegroundManager {
                 updateScoreboard();
                 updateBorderBar();
             }
-        }.runTaskTimer(plugin, 20L, 20L); // Update every second
+        }.runTaskTimer(plugin, 20L, 20L);
 
-        // Game start announcement
         String playerList = participants.stream()
             .map(Player::getName)
             .collect(Collectors.joining(", "));
         
         for (Player p : Bukkit.getOnlinePlayers()) {
-            // Main title
             p.sendTitle(
                 ChatColor.GOLD + "⚔ BATTLEGROUND ⚔",
                 ChatColor.YELLOW + "Trận đấu bắt đầu!",
                 20, 100, 20
             );
             
-            // Information messages
             if (participants.contains(p)) {
                 p.sendMessage("");
-                p.sendMessage(ChatColor.GOLD + "✦ BATTLEGROUND ✦");
+                p.sendMessage(ChatColor.BOLD.GOLD  + "✦ BATTLEGROUND ✦");
                 p.sendMessage(ChatColor.WHITE + "• Người chơi: " + ChatColor.YELLOW + playerList);
                 p.sendMessage(ChatColor.WHITE + "• Border: " + ChatColor.YELLOW + String.format("%.1f", borderInitialSize) + " blocks");
                 p.sendMessage(ChatColor.WHITE + "• Thời gian: " + ChatColor.YELLOW + formatTime(matchDuration));
@@ -273,58 +292,57 @@ public class BattlegroundManager {
             }
         }
 
-        // Teleport và thiết lập người chơi
         for (Player p : participants) {
-                // Xóa dòng thêm effect vì đã chuyển lên trên
+            if (p.isOnline()) {
                 p.teleport(mapCenter.clone().add(0, 10, 0));
                 p.setInvulnerable(true);
-                p.sendMessage(ChatColor.GREEN + "Bạn đã vào trận Battleground!");
-                p.sendMessage(ChatColor.YELLOW + "Border ban đầu: " + String.format("%.1f", borderInitialSize) + " blocks");
-                plugin.getLogger().info("Teleported " + p.getName() + " to match start location");
+                p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.GREEN + "Bạn đã vào trận Battleground!");
+                // Apply effects immediately after countdown
+                p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
+                plugin.getLogger().info("Teleported " + p.getName() + " to match start location and applied effects");
+            }
         }
-        
 
-        // Hết thời gian bất tử
         new BukkitRunnable() {
             @Override
             public void run() {
                 for (Player p : participants) {
                     if (p.isOnline()) {
                         p.setInvulnerable(false);
-                        p.sendMessage(ChatColor.RED + "Bất tử đã hết, trận đấu bắt đầu!");
+                        p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.RED + "Bất tử đã hết, trận đấu bắt đầu!");
+                        p.sendTitle(
+                            ChatColor.RED + "⚠ Thời gian bất tử đã hết ⚠",
+                            ChatColor.RED + "Trận Chiến Bắt Đầu!",
+                            10, 60, 20
+                        );
                     }
                 }
             }
         }.runTaskLater(plugin, invincibilityDuration * 20L);
 
-        // Thu nhỏ border
-        // Tính toán thời gian cho các giai đoạn (tính bằng ticks)
-        long mainPhases = 4; // 80% thời gian đầu chia làm 4 giai đoạn
-        long mainTimePerPhase = (matchDuration * 20L) / mainPhases; // Chuyển seconds thành ticks (20 ticks = 1 second)
-  
+        long mainPhases = 4;
+        long mainTimePerPhase = (matchDuration * 20L) / mainPhases;
 
-        // Giai đoạn chính (80% đầu)
         new BukkitRunnable() {
             int phase = 0;
             double currentSize = borderInitialSize;
 
             @Override
-            public void run() {                phase++;
+            public void run() {
+                phase++;
                 if (phase <= mainPhases) {
                     currentSize = borderInitialSize - ((borderInitialSize * 0.2) * phase);
                     border.setSize(currentSize, 40L);
                     currentPhase = phase;
                     
-                    String message = ChatColor.GOLD + "Border đang thu nhỏ!\n" +
-                            ChatColor.WHITE + "• Kích thước mới: " + String.format("%.1f", currentSize) + "\n" +
-                            ChatColor.WHITE + "• Còn " + (mainPhases - phase) + " lần thu nhỏ chính";
+                    String message = ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.GOLD + "Border đang thu nhỏ!\n" ;
                     
-                    // Send title to all players
                     for (Player p : participants) {
                         if (p.isOnline()) {
                             p.sendTitle(
-                                ChatColor.RED + "⚠ Border thu nhỏ!",
-                                ChatColor.YELLOW + "Kích thước mới: " + String.format("%.1f", currentSize),
+                            ChatColor.RED + "⚠ Border thu nhỏ ⚠",
+                            ChatColor.YELLOW + "Kích thước mới: " + String.format("%.1f", currentSize) +" Blocks",
                                 10, 60, 20
                             );
                         }
@@ -332,7 +350,6 @@ public class BattlegroundManager {
                     
                     Bukkit.broadcastMessage(message);
                     
-                    // Update particles and boss bar
                     showBorderParticles();
                     createBorderBar();
                     updateBorderBar();
@@ -347,11 +364,9 @@ public class BattlegroundManager {
             }
         }.runTaskTimer(plugin, mainTimePerPhase, mainTimePerPhase);
 
-        // Kiểm tra người thắng
         new BukkitRunnable() {
             @Override
             public void run() {
-                // Đếm số người chơi còn sống (không ở chế độ spectator)
                 int alivePlayers = 0;
                 Player lastAlivePlayer = null;
                 
@@ -362,14 +377,10 @@ public class BattlegroundManager {
                     }
                 }
 
-                // Chỉ kết thúc khi còn 1 người sống
                 if (alivePlayers == 1 && lastAlivePlayer != null) {
-                    Bukkit.broadcastMessage(ChatColor.GOLD + lastAlivePlayer.getName() + " đã thắng Battleground!");
                     stop();
                     cancel();
-                } 
-                // Hoặc khi không còn ai sống
-                else if (alivePlayers == 0) {
+                } else if (alivePlayers == 0) {
                     Bukkit.broadcastMessage(ChatColor.RED + "Trận đấu kết thúc - Không có người thắng cuộc!");
                     stop();
                     cancel();
@@ -379,7 +390,7 @@ public class BattlegroundManager {
     }
 
     private void startFinalPhases(double startSize) {
-        long timePerPhase = 40L; // 2 seconds
+        long timePerPhase = 40L;
         
         new BukkitRunnable() {
             int phase = 0;
@@ -395,20 +406,19 @@ public class BattlegroundManager {
                     
                     border.setSize(currentSize, timePerPhase);
                     
-                    String message = ChatColor.RED + "CẢNH BÁO: Giai đoạn cuối!\n" +
-                            ChatColor.WHITE + "• Kích thước mới: " + String.format("%.1f", currentSize) + "\n" +
-                            ChatColor.WHITE + "• Còn " + (4 - phase) + " lần thu nhỏ\n" +
-                            ChatColor.WHITE + "• Border sắp biến mất!";
+                    String message = ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.RED + "CẢNH BÁO: Giai đoạn cuối!\n" +
+                        ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ ChatColor.WHITE + "• Vòng bo sắp biến mất!";
                     
                     Bukkit.broadcastMessage(message);
+                    Bukkit.broadcastMessage("");
                     
                     if (phase == 4) {
-                        // Xóa border và bắt đầu gây sát thương toàn map
                         border.reset();
                         border = null;
                         startGlobalDamage();
-                        Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã biến mất!\n" + 
-                                          ChatColor.RED + "Toàn bộ khu vực sẽ gây sát thương!");
+                        Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.RED + "Toàn bộ bản đồ sẽ chịu sát thương!");
+                        Bukkit.broadcastMessage("");
+                        Bukkit.broadcastMessage("");
                         cancel();
                     }
                 }
@@ -416,7 +426,6 @@ public class BattlegroundManager {
         }.runTaskTimer(plugin, timePerPhase, timePerPhase);
     }
 
-    // Thêm phương thức mới để gây sát thương toàn map
     private void startGlobalDamage() {
         new BukkitRunnable() {
             @Override
@@ -428,25 +437,26 @@ public class BattlegroundManager {
 
                 for (Player p : participants) {
                     if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
-                        p.damage(150.0); // Sát thương player chịu khi border biến mất hoàn toàn
+                        p.damage(170.0);
                     }
                 }
             }
-        }.runTaskTimer(plugin, 0L, 20L); // Gây sát thương mỗi giây
+        }.runTaskTimer(plugin, 0L, 20L);
 
-        Bukkit.broadcastMessage(ChatColor.RED+"Cảnh Báo : Toàn bộ vòng bo đã biến mất!");
+        Bukkit.broadcastMessage("");
+        Bukkit.broadcastMessage("");
+        Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.RED+"Cảnh Báo : Toàn bộ vòng bo đã biến mất!");
     }
 
     public void stop() {
         if (!isRunning) {
             plugin.getLogger().warning("Stop called while match is not running!");
             return;
-        }        // Show end game stats
+        }
         Bukkit.broadcastMessage("");
-        Bukkit.broadcastMessage(ChatColor.GOLD + "✦ KẾT QUẢ TRẬN ĐẤU ✦");
+        Bukkit.broadcastMessage(ChatColor.WHITE + "✦ KẾT QUẢ TRẬN ĐẤU BattleGround  ✦");
         Bukkit.broadcastMessage("");
 
-        // Find winner if exists
         Player winner = null;
         for (Player p : participants) {
             if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
@@ -455,13 +465,13 @@ public class BattlegroundManager {
             }
         }
 
-        // Show winner
         if (winner != null) {
-            Bukkit.broadcastMessage(ChatColor.GOLD + "⚔ NGƯỜI THẮNG CUỘC ⚔");
+            Bukkit.broadcastMessage(ChatColor.GOLD + "⚔ NGƯỜI SỐNG SÓT CUỐI CÙNG ⚔");
             Bukkit.broadcastMessage(ChatColor.YELLOW + "► " + winner.getName());
             Bukkit.broadcastMessage("");
+            Bukkit.broadcastMessage("");
+            Bukkit.broadcastMessage("");
 
-            // Show winner title to all
             for (Player p : Bukkit.getOnlinePlayers()) {
                 p.sendTitle(
                     ChatColor.GOLD + "⚔ " + winner.getName() + " ⚔",
@@ -470,81 +480,79 @@ public class BattlegroundManager {
                 );
                 p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
             }
-        }        // Show match kill stats
+        }
         if (!kills.isEmpty()) {
-            Bukkit.broadcastMessage(ChatColor.RED + "☠ TOP KILLS TRẬN NÀY ☠");
-            // Tạo một bản sao của kills map để không ảnh hưởng đến dữ liệu gốc
+            Bukkit.broadcastMessage(ChatColor.RED + "☠ TOP KILL ☠");
             Map<Player, Integer> matchKills = new HashMap<>(kills);
             List<Map.Entry<Player, Integer>> matchKillers = new ArrayList<>(matchKills.entrySet());
             matchKillers.sort((a, b) -> b.getValue().compareTo(a.getValue()));
             
             int rank = 1;
             for (Map.Entry<Player, Integer> entry : matchKillers) {
-                String prefix = rank == 1 ? "★" : rank == 2 ? "☆" : "✮";
+                String prefix = rank == 1 ? "Top 1:" : rank == 2 ? "Top 2:" : "Top 3:";
                 Bukkit.broadcastMessage(ChatColor.YELLOW + prefix + " " + 
-                    ChatColor.WHITE + entry.getKey().getName() + ": " + 
-                    ChatColor.GREEN + entry.getValue() + " kills trong trận này");
+                    ChatColor.WHITE + entry.getKey().getName() + " " + 
+                    ChatColor.WHITE + "( " +
+                    ChatColor.GREEN + entry.getValue() + " kill"
+                    +ChatColor.WHITE + ")");
                 
                 if (rank >= 3) break;
                 rank++;
             }
-            // Clear match kills sau khi hiển thị stats
             kills.clear();
         }
         
         Bukkit.broadcastMessage("");
 
-        // Reset border
         if (border != null) {
             border.reset();
             border = null;
         }
         
-        // Remove BossBar
         if (borderBar != null) {
             borderBar.removeAll();
             borderBar = null;
         }
         
-        // Reset all tasks
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
             }
         }
-          // Auto-leave all players and remove region access
+
         List<Player> playersToRemove = new ArrayList<>(participants);
         for (Player p : playersToRemove) {
             if (p.isOnline()) {
                 p.setGameMode(GameMode.SURVIVAL);
-                resetPlayerScoreboard(p); // Reset scoreboard before unregistering
-                unregisterPlayer(p); // This will also remove them from the region
-                p.sendMessage(ChatColor.GREEN + "Trận đấu đã kết thúc! Bạn đã được đưa về trạng thái bình thường.");
+                resetPlayerScoreboard(p);
+                unregisterPlayer(p);
+                p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.GREEN + "Trận đấu đã kết thúc! Bạn đã được đưa về trạng thái bình thường.");
             }
-        }        // Reset scoreboard objective
+        }
         if (gameScoreboard.getObjective("bginfo") != null) {
             gameScoreboard.getObjective("bginfo").unregister();
         }
 
-        // Khôi phục scoreboard gốc cho tất cả người chơi
         for (Map.Entry<Player, Scoreboard> entry : new HashMap<>(originalScoreboards).entrySet()) {
             Player player = entry.getKey();
             if (player.isOnline()) {
                 resetPlayerScoreboard(player);
             }
         }
-        originalScoreboards.clear();        // Reset states
+        originalScoreboards.clear();
+        vanishedArmor.clear();
         participants.clear();
         isRunning = false;
+        isCountingDown = false;
         startTime = -1;
-        currentPhase = 0; // Reset phase counter
+        currentPhase = 0;
 
         if (countdownTask != null) {
             countdownTask.cancel();
             countdownTask = null;
         }
 
-        Bukkit.broadcastMessage(ChatColor.GOLD + "Battleground đã kết thúc!");
+        Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.GOLD + "Battleground đã kết thúc!");
         plugin.getLogger().info("Match stopped and all players reset to survival mode");
     }
 
@@ -552,7 +560,6 @@ public class BattlegroundManager {
         try {
             YamlConfiguration config = new YamlConfiguration();
             
-            // Save total kills for each player
             for (Map.Entry<Player, Integer> entry : totalKills.entrySet()) {
                 String uuid = entry.getKey().getUniqueId().toString();
                 String playerName = entry.getKey().getName();
@@ -560,10 +567,7 @@ public class BattlegroundManager {
                 config.set("kills." + uuid + ".total", entry.getValue());
             }
             
-            // Create parent directories if they don't exist
             killDataFile.getParentFile().mkdirs();
-            
-            // Save the configuration
             config.save(killDataFile);
             plugin.getLogger().info("Successfully saved kill data to " + killDataFile.getName());
         } catch (IOException e) {
@@ -587,7 +591,7 @@ public class BattlegroundManager {
                 return;
             }
 
-            totalKills.clear(); // Clear existing data before loading
+            totalKills.clear();
             for (String uuid : killsSection.getKeys(false)) {
                 try {
                     UUID playerUUID = UUID.fromString(uuid);
@@ -609,7 +613,6 @@ public class BattlegroundManager {
     }
 
     public void forceResetBorder() {
-        // Reset border cho tất cả các world
         for (World world : Bukkit.getWorlds()) {
             WorldBorder border = world.getWorldBorder();
             border.reset();
@@ -624,13 +627,10 @@ public class BattlegroundManager {
             return;
         }
 
-        // Reset border hiện tại
         border.reset();
         border.setCenter(mapCenter);
-        // Set border về 0 ngay lập tức
         border.setSize(0, 1L);
 
-        // Thông báo
         Bukkit.broadcastMessage(ChatColor.RED + "CẢNH BÁO: Border đã thu về 0!");
         plugin.getLogger().info("Border was force shrunk to 0");
     }
@@ -665,76 +665,72 @@ public class BattlegroundManager {
                 plugin.getLogger().warning("Border size mismatch in setBorderSize! Expected: " + size + ", Actual: " + actualSize);
             }
         }
-    }    private void setupScoreboard() {
+    }
+
+    private void setupScoreboard() {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
         gameScoreboard = manager.getNewScoreboard();
-        // Reset any existing objective
         if (gameScoreboard.getObjective("bginfo") != null) {
             gameScoreboard.getObjective("bginfo").unregister();
         }
-        // Create new objective
         Objective objective = gameScoreboard.registerNewObjective("bginfo", Criteria.DUMMY, ChatColor.GOLD + "♦ Battleground ♦");
         objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-        // Lưu và thiết lập scoreboard cho tất cả người chơi tham gia
         for (Player p : participants) {
-            // Lưu scoreboard hiện tại của người chơi nếu chưa từng lưu (chỉ lưu lần đầu khi bắt đầu BG)
             if (!originalScoreboards.containsKey(p)) {
                 Scoreboard current = p.getScoreboard();
-                // Đảm bảo không lưu board BG (tránh trường hợp đã bị set trước đó)
                 if (current != null && current != gameScoreboard) {
                     originalScoreboards.put(p, current);
                 } else {
-                    // Nếu board hiện tại là null hoặc là board BG, lưu main scoreboard
                     originalScoreboards.put(p, Bukkit.getScoreboardManager().getMainScoreboard());
                 }
             }
-            // Đặt scoreboard BG cho người chơi
             p.setScoreboard(gameScoreboard);
         }
-    }    private void resetPlayerScoreboard(Player player) {
-    // Khôi phục scoreboard ban đầu
-    if (originalScoreboards.containsKey(player)) {
-        Scoreboard originalBoard = originalScoreboards.get(player);
-        if (originalBoard != null) {
-            player.setScoreboard(originalBoard);
-            plugin.getLogger().info("Restored original scoreboard for player: " + player.getName());
-        } else {
-            player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-            plugin.getLogger().info("Set main scoreboard for player (original was null): " + player.getName());
-        }
-        originalScoreboards.remove(player);
-    } else {
-        player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-        plugin.getLogger().info("Set main scoreboard for player (no original): " + player.getName());
     }
 
-    new BukkitRunnable() {
-        @Override
-        public void run() {
-            try {
-                player.performCommand("board");
-                plugin.getLogger().info("Executed first /board for player: " + player.getName());
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to execute first /board for player " + player.getName() + ": " + e.getMessage());
+    private void resetPlayerScoreboard(Player player) {
+        if (originalScoreboards.containsKey(player)) {
+            Scoreboard originalBoard = originalScoreboards.get(player);
+            if (originalBoard != null) {
+                player.setScoreboard(originalBoard);
+                plugin.getLogger().info("Restored original scoreboard for player: " + player.getName());
+            } else {
+                player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
+                plugin.getLogger().info("Set main scoreboard for player (original was null): " + player.getName());
             }
+            originalScoreboards.remove(player);
+        } else {
+            player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
+            plugin.getLogger().info("Set main scoreboard for player (no original): " + player.getName());
         }
-    }.runTaskLater(plugin, 10L); // Chạy sau 0.5 giây
 
-    new BukkitRunnable() {
-        @Override
-        public void run() {
-            try {
-                player.performCommand("board");
-                plugin.getLogger().info("Executed second /board for player: " + player.getName());
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to execute second /board for player " + player.getName() + ": " + e.getMessage());
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                try {
+                    player.performCommand("board");
+                    plugin.getLogger().info("Executed first /board for player: " + player.getName());
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed to execute first /board for player " + player.getName() + ": " + e.getMessage());
+                }
             }
-        }
-    }.runTaskLater(plugin, 20L); // Chạy sau 1 giây
-}
+        }.runTaskLater(plugin, 10L);
+
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                try {
+                    player.performCommand("board");
+                    plugin.getLogger().info("Executed second /board for player: " + player.getName());
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed to execute second /board for player " + player.getName() + ": " + e.getMessage());
+                }
+            }
+        }.runTaskLater(plugin, 20L);
+    }
 
     private void updateScoreboard() {
-        if (!isRunning) return;
+        if (!isRunning || isCountingDown) return;
 
         Objective objective = gameScoreboard.getObjective("bginfo");
         if (objective != null) {
@@ -751,37 +747,38 @@ public class BattlegroundManager {
         }
 
         int score = 15;
-        // Display time remaining if match is in progress
-        if (isRunning) {
-            long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
-            if (timeLeft > 0) {
-                objective.getScore(ChatColor.WHITE + "⌚ Time: " + ChatColor.YELLOW + formatTime(timeLeft)).setScore(score--);
-                objective.getScore("").setScore(score--);
-            }
-
-            // Display player stats
-            objective.getScore(ChatColor.WHITE + "⚔ Players:").setScore(score--);
-            objective.getScore(ChatColor.GREEN + " ▸ Alive: " + alive).setScore(score--);
-            objective.getScore(ChatColor.RED + " ▸ Dead: " + (participants.size() - alive)).setScore(score--);
-            objective.getScore(" ").setScore(score--);
-
-            // Display kills
-            for (Player p : participants) {
-                if (kills.containsKey(p)) {
-                    objective.getScore(ChatColor.YELLOW + p.getName() + ": " + kills.get(p) + " kills").setScore(score--);
-                }
-            }
-            objective.getScore("  ").setScore(score--);
-            
-            // Display border info if active
-            if (border != null) {
-                objective.getScore(ChatColor.YELLOW + "⭕ Border: " + String.format("%.1f", border.getSize())).setScore(score--);
-                objective.getScore(ChatColor.YELLOW + " ▸ Phase: " + currentPhase + "/4").setScore(score--);
-                objective.getScore("   ").setScore(score--);
-            }
+        long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
+        if (timeLeft > 0) {
+            objective.getScore(ChatColor.WHITE + "⌚ Thời gian còn lại: " + ChatColor.YELLOW + formatTime(timeLeft)).setScore(score--);
+            objective.getScore("").setScore(score--);
         }
 
-        // Set updated scoreboard for all participants
+        objective.getScore(ChatColor.WHITE + "⚔ Số người tham gia: " + participants.size()).setScore(score--);
+        objective.getScore("");
+        objective.getScore(ChatColor.GREEN + " ▸ Còn sống: " + alive).setScore(score--);
+        objective.getScore(" ").setScore(score--);
+
+        for (Player p : participants) {
+            if (kills.containsKey(p)) {
+                objective.getScore(ChatColor.YELLOW + p.getName() + ": " + kills.get(p) + " kills").setScore(score--);
+            }
+        }
+        objective.getScore("  ").setScore(score--);
+
+        if (border != null) {
+            objective.getScore(ChatColor.YELLOW + "⭕ Chiều rộng Bo: " + String.format("%.1f", border.getSize())+" block").setScore(score--);
+            objective.getScore(ChatColor.YELLOW + " ▸ Phase: " + currentPhase + "/4").setScore(score--);
+            
+            long phaseDuration = matchDuration / 4;
+            long elapsedTime = (System.currentTimeMillis() / 1000) - matchStartTime;
+            long timeInCurrentPhase = elapsedTime % phaseDuration;
+            long timeToNextPhase = phaseDuration - timeInCurrentPhase;
+            if (currentPhase < 4 && timeToNextPhase > 0) {
+                objective.getScore(ChatColor.YELLOW + " ▸ Đợt Bo kế tiếp: " + formatTime(timeToNextPhase)).setScore(score--);
+            }
+            objective.getScore("   ").setScore(score--);
+        }
+
         for (Player p : participants) {
             if (p.isOnline()) {
                 p.setScoreboard(gameScoreboard);
@@ -791,13 +788,12 @@ public class BattlegroundManager {
 
     public String getStatus() {
         if (!isRunning) {
-            return ChatColor.RED + "Không có trận đấu nào đang diễn ra!";
+            return ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ ChatColor.RED + "Không có trận đấu nào đang diễn ra!";
         }
 
         StringBuilder status = new StringBuilder();
         status.append(ChatColor.GOLD + "✦ Trạng thái BattleGround ✦\n");
         
-        // Đếm người còn sống
         int alivePlayers = 0;
         List<String> alivePlayerNames = new ArrayList<>();
         for (Player p : participants) {
@@ -827,7 +823,7 @@ public class BattlegroundManager {
 
     public String getPlayerList() {
         if (participants.isEmpty()) {
-            return ChatColor.RED + "Chưa có người chơi nào tham gia!";
+            return ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] " + ChatColor.RED + "Chưa có người chơi nào tham gia!";
         }
 
         StringBuilder list = new StringBuilder();
@@ -886,22 +882,24 @@ public class BattlegroundManager {
         for (Player p : participants) {
             borderBar.addPlayer(p);
         }
-    }    private void updateBorderBar() {
+    }
+
+    private void updateBorderBar() {
         if (borderBar != null && border != null) {
-            borderBar.setTitle(ChatColor.GOLD + "Border: " + String.format("%.1f", border.getSize()) + 
-                             ChatColor.YELLOW + " | Phase: " + currentPhase + "/4");
-            // Set progress based on current size vs initial size
+            borderBar.setTitle(ChatColor.GOLD + "Vòng Bo: " + String.format("%.1f", border.getSize()) +" block"+ 
+                             ChatColor.YELLOW + " | Phase: " + currentPhase );
             double progress = border.getSize() / borderInitialSize;
             borderBar.setProgress(Math.max(0, Math.min(1, progress)));
         }
-    }private void showBorderParticles() {
+    }
+
+    private void showBorderParticles() {
         if (border == null) return;
         
         double size = border.getSize() / 2;
         Location center = border.getCenter();
         World world = center.getWorld();
         
-        // Show particles along border edges
         for (double x = -size; x <= size; x += 2) {
             spawnBorderParticle(world, center.clone().add(x, 0, -size));
             spawnBorderParticle(world, center.clone().add(x, 0, size));
@@ -918,46 +916,38 @@ public class BattlegroundManager {
             world.spawnParticle(Particle.END_ROD, loc.clone().add(0, y, 0), 1, 0, 0, 0, 0);
             world.spawnParticle(Particle.DRAGON_BREATH, loc.clone().add(0, y, 0), 1, 0, 0, 0, 0);
         }
-    }    public void addKill(Player killer) {
-        if (!isRunning) return; // Chỉ tính kill khi trận đấu đang diễn ra
+    }
+
+    public void addKill(Player killer) {
+        if (!isRunning) return;
         
-        // Tăng số kill trong trận hiện tại
         kills.merge(killer, 1, Integer::sum);
-        // Tăng tổng số kill (cho bảng xếp hạng tổng)
         totalKills.merge(killer, 1, Integer::sum);
-        
-        // Thông báo kill cho người chơi
-        killer.sendMessage(ChatColor.GREEN + "+1 Kill! " + ChatColor.YELLOW + "Số kill trong trận này: " + kills.get(killer));
         
         updateScoreboard();
         
-        // Give killer full health as a reward
-        killer.setHealth(20.0); // 20.0 is the default max health in Minecraft
-        
-        // Optional: Give killer some rewards like potion effects
-        killer.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 200, 0)); // Speed I for 10 seconds
-        killer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 100, 0)); // Regen I for 5 seconds
+        killer.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 10 * 20, 2));
+        killer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
     }
 
-    // Thêm phương thức mới để hiển thị tổng số kill của tất cả các trận
     public String getTopTotalKills() {
         if (totalKills.isEmpty()) {
             return ChatColor.RED + "Chưa có thống kê kills nào!";
         }
 
         StringBuilder status = new StringBuilder();
-        status.append(ChatColor.GOLD + "✦ TOP KILLS TỔNG ✦\n");
+        status.append(ChatColor.GOLD + "✦ TOP KILLS BattleGround ✦\n");
         
         List<Map.Entry<Player, Integer>> topKillers = new ArrayList<>(totalKills.entrySet());
         topKillers.sort((a, b) -> b.getValue().compareTo(a.getValue()));
         
         int rank = 1;
         for (Map.Entry<Player, Integer> entry : topKillers) {
-            String prefix = rank == 1 ? "★" : rank == 2 ? "☆" : "✮";
+            String prefix = rank == 1 ? "#1." : rank == 2 ? "#2." : "#3.";
             status.append(ChatColor.YELLOW + prefix + " " + 
                          ChatColor.WHITE + entry.getKey().getName() + ": " + 
                          ChatColor.GREEN + entry.getValue() + " kills\n");
-            if (rank >= 10) break; // Chỉ hiển thị top 10
+            if (rank >= 10) break;
             rank++;
         }
         
@@ -965,7 +955,6 @@ public class BattlegroundManager {
     }
 
     private void startAutoSave() {
-        // Auto-save every 5 minutes (5 * 60 * 20 = 6000 ticks)
         autoSaveTask = new BukkitRunnable() {
             @Override
             public void run() {
@@ -979,6 +968,7 @@ public class BattlegroundManager {
         if (autoSaveTask != null) {
             autoSaveTask.cancel();
         }
-        saveKillData(); // Save one last time before cleanup
+        saveKillData();
+        vanishedArmor.clear();
     }
 }

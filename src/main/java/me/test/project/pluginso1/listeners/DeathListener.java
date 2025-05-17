@@ -55,15 +55,18 @@ public class DeathListener implements Listener {
             Bukkit.broadcastMessage(ChatColor.RED + "• " + player.getName() + " đã chết!");
             if (killer != null && bgManager.getParticipants().contains(killer)) {
                 Bukkit.broadcastMessage(ChatColor.GOLD + "• " + killer.getName() + " đã giành được một điểm hạ gục!");
+                
             }
-            Bukkit.broadcastMessage(ChatColor.YELLOW + "• Số người còn sống: " + (alivePlayers-1) + "/" + 
-                                  bgManager.getParticipants().size());
+            Bukkit.broadcastMessage("");
+            Bukkit.broadcastMessage(ChatColor.GREEN + "• Số người còn sống: " + (alivePlayers-1));
+            Bukkit.broadcastMessage("");
+            Bukkit.broadcastMessage("");
 
             // Xử lý người chơi chết
             player.setGameMode(GameMode.SPECTATOR);
             player.teleport(player.getLocation().clone().add(0, 0, 0)); // Giữ nguyên vị trí
-            player.sendMessage(ChatColor.RED + "Bạn đã chết! Đã chuyển sang chế độ Spectator.");
-            player.sendMessage(ChatColor.YELLOW + "Dùng lệnh /bg leave để thoát.");
+            player.sendMessage( ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.RED + "Bạn đã chết! Đã chuyển sang chế độ Spectator.");
+            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.YELLOW + "Dùng lệnh /bg leave để thoát.");
         }
     }
 }

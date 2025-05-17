@@ -121,7 +121,6 @@ public class BattlegroundCommand implements CommandExecutor {
             }
             
             bgManager.start();
-            sender.sendMessage(ChatColor.GREEN + "Đã bắt đầu trận Battleground!");
         } else if (args[0].equalsIgnoreCase("stop")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Chỉ người chơi dùng được lệnh này!");
