@@ -8,6 +8,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import me.test.project.pluginso1.commands.BattlegroundCommand;
+import me.test.project.pluginso1.commands.BattlegroundTabCompleter;
 import me.test.project.pluginso1.listeners.DeathListener;
 import me.test.project.pluginso1.listeners.PlayerListener;
 import me.test.project.pluginso1.listeners.TeleportListener;
@@ -27,11 +28,11 @@ public class Main extends JavaPlugin {
         try {
             saveDefaultConfig();            setupWorldGuard();
             bgManager = new BattlegroundManager(this);
-            
-            // Register commands and listeners
+              // Register commands and listeners
             getCommand("bg").setExecutor(new BattlegroundCommand(bgManager));
+            getCommand("bg").setTabCompleter(new BattlegroundTabCompleter());
             getServer().getPluginManager().registerEvents(new PlayerListener(bgManager), this);
-            getServer().getPluginManager().registerEvents(new DeathListener(bgManager), this);            // Get war location from config
+            getServer().getPluginManager().registerEvents(new DeathListener(bgManager), this);// Get war location from config
             String worldName = getConfig().getString("war-location.world", "newbox");
             World world = getServer().getWorld(worldName);
             if (world == null) {

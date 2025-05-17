@@ -8,7 +8,6 @@ depend: [WorldGuard]
 commands:
   bg:
     description: Quan ly Battleground
-    usage: /<command> [join|leave|settime|start|stop|border [size|set <size>]]
 
 permissions:
   battleground.*:

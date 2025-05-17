@@ -13,13 +13,28 @@ public class BattlegroundCommand implements CommandExecutor {
 
     public BattlegroundCommand(BattlegroundManager bgManager) {
         this.bgManager = bgManager;
-    }
-
-    @Override
+    }    @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (args.length == 0) {
-            sender.sendMessage(ChatColor.YELLOW + "Dùng: /bg [join|leave|settime|start [duration]|stop|border]");
-            sender.sendMessage(ChatColor.YELLOW + "Số người tham gia tối thiểu: " + bgManager.getMinPlayers());
+        if (args.length == 0) {            // Thông tin chung cho tất cả người chơi
+            sender.sendMessage(ChatColor.GOLD + "✦ Battleground_v1.0 ✦");
+            sender.sendMessage(ChatColor.GRAY + "➥ Author: FLD-TN");
+
+            // Hiển thị lệnh dựa theo quyền
+            if (sender.hasPermission("battleground.admin") || sender.isOp()) {
+                sender.sendMessage(ChatColor.WHITE + "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg join" + ChatColor.GRAY + " - đăng kí tham gia BattleGround");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg start <thời gian> <kích thước border>" + ChatColor.GRAY + " - Bắt đầu trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg stop" + ChatColor.GRAY + " - Dừng trận đấu đang diễn ra");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg settime <seconds>" + ChatColor.GRAY + " - Đặt thời gian bắt đầu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border size" + ChatColor.GRAY + " - Xem kích thước hiện tại");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border set <size>" + ChatColor.GRAY + " - Đặt kích thước border");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border end" + ChatColor.GRAY + " - Thu nhỏ border về 0");
+            } else {
+                sender.sendMessage(ChatColor.WHITE + "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
+                sender.sendMessage(ChatColor.YELLOW + "Player Commands:");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg join" + ChatColor.GRAY + " - Tham gia trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg leave" + ChatColor.GRAY + " - Rời khỏi trận đấu");
+            }
             return true;
         }
 
@@ -173,10 +188,7 @@ public class BattlegroundCommand implements CommandExecutor {
             } else {
                 sender.sendMessage(ChatColor.RED + "Dùng: /bg border [size|set <size>|end]");
             }
-        } else {
-            sender.sendMessage(ChatColor.YELLOW + "Dùng: /bg [join|leave|settime|start [duration]|stop|border]");
-            sender.sendMessage(ChatColor.YELLOW + "Số người tham gia tối thiểu: " + bgManager.getMinPlayers());
-        }
+        } 
         return true;
     }
 }

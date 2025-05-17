@@ -8,6 +8,7 @@ me\test\project\pluginso1\commands\BattlegroundCommand.class
 me\test\project\pluginso1\listeners\PlayerListener.class
 me\test\project\pluginso1\BattlegroundManager$5.class
 me\test\project\pluginso1\BattlegroundManager$4.class
+me\test\project\pluginso1\commands\BattlegroundTabCompleter.class
 me\test\project\pluginso1\Main.class
 me\test\project\pluginso1\BattlegroundManager.class
 me\test\project\pluginso1\BattlegroundManager$6.class
