@@ -86,14 +86,11 @@ public class Main extends JavaPlugin {
         } else {
             getLogger().warning("World 'newbox' not found! The plugin may not work correctly.");
         }
-    }
-
-    @Override
+    }    @Override
     public void onDisable() {
         if (bgManager != null) {
-            bgManager.forceResetBorder(); 
-            bgManager.stop();
+            bgManager.cleanup();
         }
-        getLogger().info("Battleground plugin disabled!");
+        getLogger().info("Plugin đã tắt!");
     }
 }

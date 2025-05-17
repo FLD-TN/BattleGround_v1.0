@@ -6,6 +6,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.command.TabCompleter;
 
 
 public class BattlegroundCommand implements CommandExecutor {
@@ -17,23 +18,29 @@ public class BattlegroundCommand implements CommandExecutor {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {            // Thông tin chung cho tất cả người chơi
             sender.sendMessage(ChatColor.GOLD + "✦ Battleground_v1.0 ✦");
-            sender.sendMessage(ChatColor.GRAY + "➥ Author: FLD-TN");
-
-            // Hiển thị lệnh dựa theo quyền
+            sender.sendMessage(ChatColor.GRAY + "➥ Author: FLD-TN");            // Hiển thị lệnh dựa theo quyền
             if (sender.hasPermission("battleground.admin") || sender.isOp()) {
                 sender.sendMessage(ChatColor.WHITE + "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg join" + ChatColor.GRAY + " - đăng kí tham gia BattleGround");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg start <thời gian> <kích thước border>" + ChatColor.GRAY + " - Bắt đầu trận đấu");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg stop" + ChatColor.GRAY + " - Dừng trận đấu đang diễn ra");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg settime <seconds>" + ChatColor.GRAY + " - Đặt thời gian bắt đầu");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border size" + ChatColor.GRAY + " - Xem kích thước hiện tại");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border set <size>" + ChatColor.GRAY + " - Đặt kích thước border");
-                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.BLUE + "/bg border end" + ChatColor.GRAY + " - Thu nhỏ border về 0");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg join" + ChatColor.GRAY + " - đăng kí tham gia BattleGround");                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg start <thời gian> <kích thước border>" + ChatColor.GRAY + " - Bắt đầu trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg stop" + ChatColor.GRAY + " - Dừng trận đấu đang diễn ra");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg status" + ChatColor.GRAY + " - Xem trạng thái trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg list" + ChatColor.GRAY + " - Xem danh sách người chơi tham gia");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg topkill" + ChatColor.GRAY + " - Xem bảng xếp hạng số kill tổng");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg settime <seconds>" + ChatColor.GRAY + " - Đặt thời gian bắt đầu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg border" + ChatColor.GRAY + " - Quản lý border");
+                sender.sendMessage(ChatColor.GRAY + "  ├───── " + ChatColor.YELLOW + "size" + ChatColor.GRAY + " - Xem kích thước hiện tại");
+                sender.sendMessage(ChatColor.GRAY + "  ├───── " + ChatColor.YELLOW + "set <size>" + ChatColor.GRAY + " - Đặt kích thước border");
+                sender.sendMessage(ChatColor.GRAY + "  ├───── " + ChatColor.YELLOW + "pause" + ChatColor.GRAY + " - Tạm dừng thu nhỏ border");
+                sender.sendMessage(ChatColor.GRAY + "  ├───── " + ChatColor.YELLOW + "resume" + ChatColor.GRAY + " - Tiếp tục thu nhỏ border");
+                sender.sendMessage(ChatColor.GRAY + "  └───── " + ChatColor.YELLOW + "end" + ChatColor.GRAY + " - Thu nhỏ border về 0");
             } else {
                 sender.sendMessage(ChatColor.WHITE + "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯");
                 sender.sendMessage(ChatColor.YELLOW + "Player Commands:");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg join" + ChatColor.GRAY + " - Tham gia trận đấu");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg leave" + ChatColor.GRAY + " - Rời khỏi trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg status" + ChatColor.GRAY + " - Xem trạng thái trận đấu");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg list" + ChatColor.GRAY + " - Xem danh sách người chơi tham gia");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg topkill" + ChatColor.GRAY + " - Xem bảng xếp hạng số kill tổng");
             }
             return true;
         }
@@ -130,7 +137,20 @@ public class BattlegroundCommand implements CommandExecutor {
                 return true;
             }
             bgManager.stop();
-            sender.sendMessage(ChatColor.GREEN + "Đã dừng trận Battleground!");
+            sender.sendMessage(ChatColor.GREEN + "Đã dừng trận Battleground!");        } else if (args[0].equalsIgnoreCase("status")) {
+            String status = bgManager.getStatus();
+            if (status != null) {
+                sender.sendMessage(status);
+            } else {
+                sender.sendMessage(ChatColor.RED + "Không có trận đấu nào đang diễn ra.");
+            }
+        } else if (args[0].equalsIgnoreCase("list")) {
+            String playerList = bgManager.getPlayerList();
+            if (playerList != null) {
+                sender.sendMessage(playerList);
+            } else {
+                sender.sendMessage(ChatColor.RED + "Không có người chơi nào tham gia.");
+            }
         } else if (args[0].equalsIgnoreCase("border")) {
             if (!(sender instanceof Player)) {
                 sender.sendMessage(ChatColor.RED + "Chỉ người chơi dùng được lệnh này!");
@@ -168,7 +188,28 @@ public class BattlegroundCommand implements CommandExecutor {
                     sender.sendMessage(ChatColor.GREEN + "Đã đặt kích thước border thành " + (int) size + " block (khu vực: " + (int) size + "x" + (int) size + " block)");
                 } catch (NumberFormatException e) {
                     sender.sendMessage(ChatColor.RED + "Kích thước phải là số!");
+                }            } else if (args[1].equalsIgnoreCase("pause")) {
+                if (!sender.hasPermission("battleground.admin")) {
+                    sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
+                    return true;
                 }
+                if (bgManager.toggleBorderPause()) {
+                    sender.sendMessage(ChatColor.GREEN + "Đã tạm dừng thu nhỏ border!");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Không thể tạm dừng border!");
+                }
+                return true;
+            } else if (args[1].equalsIgnoreCase("resume")) {
+                if (!sender.hasPermission("battleground.admin")) {
+                    sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
+                    return true;
+                }
+                if (bgManager.toggleBorderPause()) {
+                    sender.sendMessage(ChatColor.GREEN + "Đã tiếp tục thu nhỏ border!");
+                } else {
+                    sender.sendMessage(ChatColor.RED + "Không thể tiếp tục thu nhỏ border!");
+                }
+                return true;
             } else if (args[1].equalsIgnoreCase("end")) {
                 // Kiểm tra quyền admin
                 if (!sender.hasPermission("battleground.admin")) {
@@ -186,9 +227,13 @@ public class BattlegroundCommand implements CommandExecutor {
                 sender.sendMessage(ChatColor.GREEN + "Đã force thu nhỏ border về 0!");
                 return true;
             } else {
-                sender.sendMessage(ChatColor.RED + "Dùng: /bg border [size|set <size>|end]");
+                sender.sendMessage(ChatColor.RED + "Dùng: /bg border [size|set <size>|pause|resume|end]");
             }
-        } 
+        } else if (args[0].equalsIgnoreCase("topkill")) {
+            String topKills = bgManager.getTopTotalKills();
+            sender.sendMessage(topKills);
+            return true;
+        }
         return true;
     }
 }

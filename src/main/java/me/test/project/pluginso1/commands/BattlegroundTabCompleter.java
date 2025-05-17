@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class BattlegroundTabCompleter implements TabCompleter {
-    private final List<String> playerCommands = Arrays.asList("join", "leave");
+    private final List<String> playerCommands = Arrays.asList("join", "leave", "status", "list", "topkill");
     private final List<String> adminCommands = Arrays.asList("start", "stop", "settime", "border");
-    private final List<String> borderSubCommands = Arrays.asList("size", "set", "end");
+    private final List<String> borderSubCommands = Arrays.asList("size", "set", "pause", "resume", "end");
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
