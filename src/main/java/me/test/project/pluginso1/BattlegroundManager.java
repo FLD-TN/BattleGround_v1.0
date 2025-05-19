@@ -145,13 +145,36 @@ public class BattlegroundManager {
             player.setGameMode(GameMode.SURVIVAL);
             resetPlayerScoreboard(player);
             player.teleport(Bukkit.getWorld("world").getSpawnLocation());
-            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                    + ChatColor.YELLOW + "Bạn đã rời khỏi Battleground!");
+            player.sendMessage(ChatColor.YELLOW + "Bạn đã rời khỏi Battleground!");
             plugin.getLogger().info("Player " + player.getName() + " unregistered and reset to survival mode");
-            if (vanishedArmor.containsKey(player)) {
-                player.getInventory().setArmorContents(vanishedArmor.get(player));
-                vanishedArmor.remove(player);
-            }
+            // Execute /board command twice to refresh scoreboard
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    try {
+                        player.performCommand("board");
+                        plugin.getLogger().info("Executed first /board for player: " + player.getName());
+                    } catch (Exception e) {
+                        plugin.getLogger().warning(
+                                "Failed to execute first /board for player " + player.getName() + ": "
+                                        + e.getMessage());
+                    }
+                }
+            }.runTaskLater(plugin, 10L);
+
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    try {
+                        player.performCommand("board");
+                        plugin.getLogger().info("Executed second /board for player: " + player.getName());
+                    } catch (Exception e) {
+                        plugin.getLogger().warning(
+                                "Failed to execute second /board for player " + player.getName() + ": "
+                                        + e.getMessage());
+                    }
+                }
+            }.runTaskLater(plugin, 20L);
         }
     }
 

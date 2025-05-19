@@ -44,7 +44,7 @@ public class DeathListener implements Listener {
                 } else {
                     p.sendTitle(
                             ChatColor.RED + "☠ " + player.getName() + " đã chết!",
-                            ChatColor.GRAY + "Bị hạ sát bởi: " + player.getName(),
+                            ChatColor.GRAY + "Đã bị thông đít !",
                             10, 60, 20);
                 }
             }
