@@ -262,7 +262,7 @@ public class BattlegroundManager {
         int score = 15;
         objective.getScore(ChatColor.YELLOW + "Bắt đầu trong: " + formatTime(countdown)).setScore(score--);
         objective.getScore("").setScore(score--);
-        objective.getScore(ChatColor.WHITE + "⚔ Số người tham gia:" + participants.size()).setScore(score--);
+        objective.getScore(ChatColor.WHITE + "⚔ Số người tham gia: " + participants.size()).setScore(score--);
 
         for (Player p : participants) {
             if (p.isOnline()) {
@@ -287,7 +287,7 @@ public class BattlegroundManager {
         border.reset();
         border.setCenter(mapCenter);
         border.setSize(borderInitialSize);
-        border.setDamageAmount(7.0);
+        border.setDamageAmount(5.0);
         border.setDamageBuffer(0.0);
         border.setWarningDistance(1);
         border.setWarningTime(0);
@@ -483,7 +483,7 @@ public class BattlegroundManager {
 
                 for (Player p : participants) {
                     if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
-                        p.damage(170.0);
+                        p.damage(150.0);
                     }
                 }
             }

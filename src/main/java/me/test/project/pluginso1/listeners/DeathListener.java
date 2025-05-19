@@ -20,7 +20,7 @@ public class DeathListener implements Listener {
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         Player killer = player.getKiller();
-        
+
         // Chỉ xử lý khi người chơi đang trong BG
         if (bgManager.isRunning() && bgManager.getParticipants().contains(player)) {
             // Đếm số người còn sống
@@ -29,7 +29,7 @@ public class DeathListener implements Listener {
                 if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
                     alivePlayers++;
                 }
-            }            // Xử lý kill trước khi gửi thông báo
+            } // Xử lý kill trước khi gửi thông báo
             if (killer != null && bgManager.getParticipants().contains(killer)) {
                 bgManager.addKill(killer);
             }
@@ -38,16 +38,14 @@ public class DeathListener implements Listener {
             for (Player p : Bukkit.getOnlinePlayers()) {
                 if (killer != null && bgManager.getParticipants().contains(killer)) {
                     p.sendTitle(
-                        ChatColor.RED + "☠ " + player.getName() + " đã chết!",
-                        ChatColor.GOLD + "Giết bởi: " + killer.getName(),
-                        10, 60, 20
-                    );
+                            ChatColor.RED + "☠ " + player.getName() + " đã chết!",
+                            ChatColor.GOLD + "Giết bởi: " + killer.getName(),
+                            10, 60, 20);
                 } else {
                     p.sendTitle(
-                        ChatColor.RED + "☠ " + player.getName() + " đã chết!",
-                        ChatColor.GRAY + "Tử vong tự nhiên",
-                        10, 60, 20
-                    );
+                            ChatColor.RED + "☠ " + player.getName() + " đã chết!",
+                            ChatColor.GRAY + "Bị hạ sát bởi: " + player.getName(),
+                            10, 60, 20);
                 }
             }
 
@@ -55,18 +53,20 @@ public class DeathListener implements Listener {
             Bukkit.broadcastMessage(ChatColor.RED + "• " + player.getName() + " đã chết!");
             if (killer != null && bgManager.getParticipants().contains(killer)) {
                 Bukkit.broadcastMessage(ChatColor.GOLD + "• " + killer.getName() + " đã giành được một điểm hạ gục!");
-                
+
             }
             Bukkit.broadcastMessage("");
-            Bukkit.broadcastMessage(ChatColor.GREEN + "• Số người còn sống: " + (alivePlayers-1));
+            Bukkit.broadcastMessage(ChatColor.GREEN + "• Số người còn sống: " + (alivePlayers - 1));
             Bukkit.broadcastMessage("");
             Bukkit.broadcastMessage("");
 
             // Xử lý người chơi chết
             player.setGameMode(GameMode.SPECTATOR);
             player.teleport(player.getLocation().clone().add(0, 0, 0)); // Giữ nguyên vị trí
-            player.sendMessage( ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.RED + "Bạn đã chết! Đã chuyển sang chế độ Spectator.");
-            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "+ChatColor.YELLOW + "Dùng lệnh /bg leave để thoát.");
+            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                    + ChatColor.RED + "Bạn đã chết! Đã chuyển sang chế độ Spectator.");
+            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                    + ChatColor.YELLOW + "Dùng lệnh /bg leave để thoát.");
         }
     }
 }

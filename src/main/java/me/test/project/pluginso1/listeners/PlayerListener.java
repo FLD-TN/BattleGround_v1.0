@@ -56,7 +56,8 @@ public class PlayerListener implements Listener {
         {
 
             // Chỉ cho phép lệnh leave
-            if (!command.startsWith("/bg leave")) {
+            if (!command.startsWith("/bg leave") || !command.startsWith("/bg status")
+                    || !command.startsWith("/bg list") || (!command.startsWith("/bg topkill"))) {
                 event.setCancelled(true);
                 player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                         + ChatColor.RED + "Bạn không thể sử dụng lệnh khi đang ở chế độ Spectator!");
