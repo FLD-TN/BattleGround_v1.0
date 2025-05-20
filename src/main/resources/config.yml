@@ -16,7 +16,26 @@ map-center:
   x: 70.525
   y: 173
   z: 83.487
+
+match-duration: 600
+
 # Thời gian miễn nhiễm sát thương khi bắt đầu (giây)
 invincibility-duration: 60
-# Số người chơi tối thiểu để bắt đầu
+
+# Số người chơi tối thiểu để bắt đầu trận đấu
 min-players: 1
+
+# Kích thước ban đầu của vòng bo (blocks)
+border-initial-size: 200.0
+
+# Kích thước cuối cùng của vòng bo (blocks)
+border-final-size: 10.0
+
+# Số giai đoạn chính của vòng bo
+number-of-phases: 5
+
+# Hệ số thu hẹp vòng bo mỗi giai đoạn (0.5-0.9, nhỏ hơn = thu hẹp nhanh hơn)
+border-shrink-factor: 0.75
+
+# Khoảng cách dịch chuyển ngẫu nhiên của tâm vòng bo (blocks, 0.0 để tắt)
+border-random-offset: 50.0
