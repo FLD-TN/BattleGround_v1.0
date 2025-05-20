@@ -88,7 +88,7 @@ public class BattlegroundManager {
     }
 
     private Location parseConfigLocation(String path) {
-        String worldName = plugin.getConfig().getString(path + ".world", "newbox");
+        String worldName = plugin.getConfig().getString(path + ".world", "lobby");
         World world = Bukkit.getWorld(worldName);
         if (world == null) {
             plugin.getLogger().warning("World '" + worldName + "' not found for " + path);
@@ -122,7 +122,7 @@ public class BattlegroundManager {
         }
         if (!isRunning && !participants.contains(player)) {
             participants.add(player);
-            String addCommand = "rg addmember -w newbox __global__ " + player.getName();
+            String addCommand = "rg addmember -w lobby __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), addCommand);
             plugin.getLogger().info("Executing command: " + addCommand + " (success: " + success + ")");
 
@@ -139,7 +139,7 @@ public class BattlegroundManager {
 
     public void unregisterPlayer(Player player) {
         if (participants.remove(player)) {
-            String removeCommand = "rg removemember -w newbox __global__ " + player.getName();
+            String removeCommand = "rg removemember -w lobby __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), removeCommand);
             plugin.getLogger().info("Executing command: " + removeCommand + " (success: " + success + ")");
             player.setGameMode(GameMode.SURVIVAL);
@@ -255,21 +255,28 @@ public class BattlegroundManager {
         }
 
         countdownTask = new BukkitRunnable() {
-            int countdown = 10;
+            int countdown = 30;
 
             @Override
             public void run() {
-                if (countdown > 0) {
+                if (countdown > 10) {
+                    if (countdown % 10 == 0) { // Thông báo mỗi 10 giây
+                        Bukkit.broadcastMessage(
+                                ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
+                                        + "] " + ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
+                        updateCountdownScoreboard(countdown);
+                    }
+                } else if (countdown > 0) { // Đếm ngược từng giây khi còn 10 giây
                     Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
                             + "] " + ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
                     updateCountdownScoreboard(countdown);
-                    countdown--;
-                } else {
+                } else { // Khi countdown = 0
                     isCountingDown = false;
                     startMatch();
                     cancel();
                     plugin.getLogger().info("Countdown finished, match started");
                 }
+                countdown--;
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
@@ -362,7 +369,7 @@ public class BattlegroundManager {
                         + ChatColor.GREEN + "Bạn đã vào trận Battleground!");
                 p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
                 p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 6 * 20, 0));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 8 * 20, 0));
                 p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
                 plugin.getLogger().info("Teleported " + p.getName() + " to match start location and applied effects");
             }
@@ -537,6 +544,7 @@ public class BattlegroundManager {
 
         if (winner != null) {
             Bukkit.broadcastMessage(ChatColor.GOLD + "⚔ NGƯỜI SỐNG SÓT CUỐI CÙNG ⚔");
+            Bukkit.broadcastMessage("");
             Bukkit.broadcastMessage(ChatColor.YELLOW + "► " + winner.getName());
             Bukkit.broadcastMessage("");
             Bukkit.broadcastMessage("");

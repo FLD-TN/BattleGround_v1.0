@@ -21,8 +21,9 @@ public class WorldListener implements Listener {
         Player player = event.getPlayer();
         World newWorld = player.getWorld();
 
-        if (newWorld.getName().equals("newbox")) {
-            // Entry control is now handled by WorldGuard __global__ region flags and membership
+        if (newWorld.getName().equals("lobby")) {
+            // Entry control is now handled by WorldGuard __global__ region flags and
+            // membership
             if (!bgManager.getParticipants().contains(player) && !player.isOp()) {
                 player.teleport(Bukkit.getWorld("world").getSpawnLocation());
                 player.sendMessage(ChatColor.RED + "Bạn không có quyền vào khu vực này!");

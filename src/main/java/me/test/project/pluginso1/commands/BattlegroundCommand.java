@@ -171,7 +171,7 @@ public class BattlegroundCommand implements CommandExecutor {
                 sender.sendMessage(ChatColor.YELLOW + "• Thời gian: " + duration + " giây");
                 sender.sendMessage(ChatColor.YELLOW + "• Border ban đầu: " + borderSize + " blocks");
                 sender.sendMessage(
-                        ChatColor.YELLOW + "• Border sẽ thu nhỏ  podpis 20% mỗi " + (duration / 5) + " giây");
+                        ChatColor.YELLOW + "• Border sẽ thu nhỏ 20% mỗi " + (duration / 5) + " giây");
             } catch (NumberFormatException e) {
                 sender.sendMessage(ChatColor.RED + "Thời gian và kích thước border phải là số!");
                 return true;

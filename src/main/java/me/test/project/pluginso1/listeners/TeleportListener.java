@@ -23,14 +23,15 @@ public class TeleportListener implements Listener {
     public void onPlayerTeleport(PlayerTeleportEvent event) {
         Player player = event.getPlayer();
         World targetWorld = event.getTo().getWorld();
-        
-        if (targetWorld.getName().equals("newbox")) {
-            // Entry control is now handled by WorldGuard __global__ region flags and membership
+
+        if (targetWorld.getName().equals("lobby")) {
+            // Entry control is now handled by WorldGuard __global__ region flags and
+            // membership
             if (!bgManager.getParticipants().contains(player) && !player.isOp()) {
                 event.setCancelled(true);
                 player.teleport(Bukkit.getWorld("world").getSpawnLocation());
                 player.sendMessage(ChatColor.RED + "Bạn không thể teleport vào khu vực này!");
-                Bukkit.getLogger().info(player.getName() + " denied teleport to newbox - Not a BG participant");
+                Bukkit.getLogger().info(player.getName() + " denied teleport to lobby - Not a BG participant");
             }
         }
     }

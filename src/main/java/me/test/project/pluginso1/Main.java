@@ -26,32 +26,33 @@ public class Main extends JavaPlugin {
     @Override
     public void onEnable() {
         try {
-            saveDefaultConfig();            setupWorldGuard();
+            saveDefaultConfig();
+            setupWorldGuard();
             bgManager = new BattlegroundManager(this);
-              // Register commands and listeners
+            // Register commands and listeners
             getCommand("bg").setExecutor(new BattlegroundCommand(bgManager));
             getCommand("bg").setTabCompleter(new BattlegroundTabCompleter());
             getServer().getPluginManager().registerEvents(new PlayerListener(bgManager), this);
-            getServer().getPluginManager().registerEvents(new DeathListener(bgManager), this);// Get war location from config
-            String worldName = getConfig().getString("war-location.world", "newbox");
+            getServer().getPluginManager().registerEvents(new DeathListener(bgManager), this);// Get war location from
+                                                                                              // config
+            String worldName = getConfig().getString("war-location.world", "lobby");
             World world = getServer().getWorld(worldName);
             if (world == null) {
                 getLogger().warning("World '" + worldName + "' not found in war-location config!");
                 return;
             }
-            
+
             Location warLocation = new Location(
-                world,
-                getConfig().getDouble("war-location.x", 0),
-                getConfig().getDouble("war-location.y", 100),
-                getConfig().getDouble("war-location.z", 0)
-            );
+                    world,
+                    getConfig().getDouble("war-location.x", 0),
+                    getConfig().getDouble("war-location.y", 100),
+                    getConfig().getDouble("war-location.z", 0));
 
             // Register remaining listeners
             getServer().getPluginManager().registerEvents(new TeleportListener(bgManager, warLocation), this);
             getServer().getPluginManager().registerEvents(new WorldListener(bgManager), this);
             getLogger().info("Battleground plugin enabled!");
-            
+
         } catch (Exception e) {
             getLogger().severe("Error enabling plugin: " + e.getMessage());
             e.printStackTrace();
@@ -61,32 +62,34 @@ public class Main extends JavaPlugin {
     private void setupWorldGuard() {
         // Get the WorldGuard region container
         container = WorldGuard.getInstance().getPlatform().getRegionContainer();
-        
+
         // Get or create region manager for newbox world
-        World newboxWorld = getServer().getWorld("newbox");
+        World newboxWorld = getServer().getWorld("lobby");
         if (newboxWorld != null) {
             regions = container.get(BukkitAdapter.adapt(newboxWorld));
             if (regions != null) {
                 // Create __global__ region if it doesn't exist
                 if (regions.getRegion("__global__") == null) {
                     // Create using command since it's more reliable than API
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), 
-                        "rg define -w newbox __global__ //-1000,-1000,-1000 1000,1000,1000");
-                    getLogger().info("Created __global__ region in newbox world");
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+                            "rg define -w lobby __global__ //-1000,-1000,-1000 1000,1000,1000");
+                    getLogger().info("Created __global__ region in lobby world");
                 }
-                
+
                 // Get __global__ region and set flags
                 ProtectedRegion global = regions.getRegion("__global__");
                 if (global != null) {
                     // Set default flags
                     global.setFlag(Flags.ENTRY, StateFlag.State.DENY);
-                    getLogger().info("WorldGuard __global__ region configured for newbox world");
+                    getLogger().info("WorldGuard __global__ region configured for lobby world");
                 }
             }
         } else {
-            getLogger().warning("World 'newbox' not found! The plugin may not work correctly.");
+            getLogger().warning("World 'lobby' not found! The plugin may not work correctly.");
         }
-    }    @Override
+    }
+
+    @Override
     public void onDisable() {
         if (bgManager != null) {
             bgManager.cleanup();

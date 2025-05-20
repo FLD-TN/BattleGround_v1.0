@@ -18,15 +18,15 @@ public class BattlegroundTabCompleter implements TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         List<String> completions = new ArrayList<>();
-        
+
         if (args.length == 1) {
             List<String> commands = new ArrayList<>(playerCommands); // All players can see basic commands
-            
+
             // Add admin commands if player has permission
             if (sender.hasPermission("battleground.admin") || sender.isOp()) {
                 commands.addAll(adminCommands);
             }
-            
+
             // Filter based on what player has typed so far
             String partialCommand = args[0].toLowerCase();
             completions.addAll(commands.stream()
@@ -34,14 +34,14 @@ public class BattlegroundTabCompleter implements TabCompleter {
                     .collect(Collectors.toList()));
         }
         // Tab completion for border subcommands
-        else if (args.length == 2 && args[0].equalsIgnoreCase("border") 
+        else if (args.length == 2 && args[0].equalsIgnoreCase("border")
                 && (sender.hasPermission("battleground.admin") || sender.isOp())) {
             String partial = args[1].toLowerCase();
             completions.addAll(borderSubCommands.stream()
                     .filter(cmd -> cmd.toLowerCase().startsWith(partial))
                     .collect(Collectors.toList()));
         }
-        
+
         return completions;
     }
 }
