@@ -71,32 +71,32 @@ public class BattlegroundManager {
         try {
             lobbyLocation = parseConfigLocation("lobby-location");
             mapCenter = parseConfigLocation("map-center");
-            matchDuration = plugin.getConfig().getInt("match-duration", 600); // Default: 10 minutes
+            matchDuration = plugin.getConfig().getInt("match-duration", 600);
             invincibilityDuration = plugin.getConfig().getInt("invincibility-duration", 30);
-            borderInitialSize = plugin.getConfig().getDouble("border-initial-size", 200.0);
+            borderInitialSize = plugin.getConfig().getDouble("border-initial-size", 500.0);
             borderFinalSize = plugin.getConfig().getDouble("border-final-size", 5.0);
             minPlayers = plugin.getConfig().getInt("min-players", 2);
-            numberOfPhases = plugin.getConfig().getInt("number-of-phases", 5); // Số phase chính
-            borderShrinkFactor = plugin.getConfig().getDouble("border-shrink-factor", 0.75); // Hệ số thu nhỏ
-            borderCenterOffset = plugin.getConfig().getDouble("border-random-offset", 50.0); // Random offset
-            finalPhaseDuration = plugin.getConfig().getInt("final-phase-duration", 60); // Thời gian của phase cuối
-                                                                                        // trước overtime
+            numberOfPhases = plugin.getConfig().getInt("number-of-phases", 6); // Tăng lên 6 phase
+            borderShrinkFactor = plugin.getConfig().getDouble("border-shrink-factor", 0.85); // Giữ nguyên để tương
+                                                                                             // thích
+            borderCenterOffset = plugin.getConfig().getDouble("border-random-offset", 50.0);
+            finalPhaseDuration = plugin.getConfig().getInt("final-phase-duration", 120); // 120 giây cho phase cuối
 
             if (borderInitialSize <= 0) {
-                borderInitialSize = 200.0;
-                plugin.getLogger().warning("Invalid border-initial-size in config, defaulting to 200");
+                borderInitialSize = 500.0;
+                plugin.getLogger().warning("Invalid border-initial-size in config, defaulting to 500");
             }
             if (borderFinalSize <= 0) {
                 borderFinalSize = 5.0;
                 plugin.getLogger().warning("Invalid border-final-size in config, defaulting to 5");
             }
             if (numberOfPhases < 1) {
-                numberOfPhases = 5;
-                plugin.getLogger().warning("Invalid number-of-phases in config, defaulting to 5");
+                numberOfPhases = 6;
+                plugin.getLogger().warning("Invalid number-of-phases in config, defaulting to 6");
             }
             if (finalPhaseDuration < 0) {
-                finalPhaseDuration = 60;
-                plugin.getLogger().warning("Invalid final-phase-duration in config, defaulting to 60");
+                finalPhaseDuration = 120;
+                plugin.getLogger().warning("Invalid final-phase-duration in config, defaulting to 120");
             }
             plugin.getLogger().info(
                     "Loaded config: border-initial-size=" + borderInitialSize +
@@ -109,11 +109,11 @@ public class BattlegroundManager {
         } catch (Exception e) {
             plugin.getLogger().severe("Error loading config: " + e.getMessage());
             e.printStackTrace();
-            borderInitialSize = 200.0;
+            borderInitialSize = 500.0;
             borderFinalSize = 5.0;
-            numberOfPhases = 5;
-            borderShrinkFactor = 0.75;
-            finalPhaseDuration = 60;
+            numberOfPhases = 6;
+            borderShrinkFactor = 0.85;
+            finalPhaseDuration = 120;
         }
     }
 
@@ -135,10 +135,11 @@ public class BattlegroundManager {
         startCheckTask = new BukkitRunnable() {
             @Override
             public void run() {
-                if (!isRunning && startTime > 0 && System.currentTimeMillis() / 1000 >= startTime) {
+                if (!isRunning && !isCountingDown && startTime > 0 && System.currentTimeMillis() / 1000 >= startTime) {
                     plugin.getLogger().info("Start check triggered, calling start()");
                     start();
                     startTime = -1;
+                    cancel(); // Hủy task ngay sau khi gọi start()
                 }
             }
         }.runTaskTimer(plugin, 0L, 20L);
@@ -239,10 +240,10 @@ public class BattlegroundManager {
     }
 
     public void start() {
-        if (isRunning) {
+        if (isRunning || isCountingDown) {
             Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                    + ChatColor.RED + "Trận đã bắt đầu!");
-            plugin.getLogger().warning("Start called while match is already running!");
+                    + ChatColor.RED + "Trận đã bắt đầu hoặc đang đếm ngược!");
+            plugin.getLogger().warning("Start called while match is running or counting down!");
             return;
         }
         if (participants.size() < minPlayers) {
@@ -289,6 +290,11 @@ public class BattlegroundManager {
 
             @Override
             public void run() {
+                if (!isRunning) {
+                    plugin.getLogger().info("Countdown cancelled due to match not running");
+                    cancel();
+                    return;
+                }
                 if (countdown > 10) {
                     if (countdown % 10 == 0) { // Thông báo mỗi 10 giây
                         Bukkit.broadcastMessage(
@@ -337,10 +343,12 @@ public class BattlegroundManager {
     }
 
     private void startMatch() {
-        if (!isRunning) {
-            plugin.getLogger().warning("startMatch called while match is not running, ignoring");
+        if (!isRunning || isCountingDown) {
+            plugin.getLogger().warning("startMatch called while match is not running or still counting down, ignoring");
             return;
         }
+        plugin.getLogger().info("Starting match with " + participants.size() + " players");
+
         matchStartTime = System.currentTimeMillis() / 1000;
         World world = mapCenter.getWorld();
         border = world.getWorldBorder();
@@ -476,17 +484,20 @@ public class BattlegroundManager {
         double[] phaseSizes = new double[numberOfPhases + 1];
         phaseSizes[0] = borderInitialSize;
 
-        // Tính toán kích thước giảm dần theo hệ số (phi tuyến)
+        // Phase 1: Rút 30%
+        phaseSizes[1] = borderInitialSize * 0.7; // 500 * 0.7 = 350
+        // Phase 2: Rút 20% của phase 1
+        phaseSizes[2] = phaseSizes[1] * 0.8; // 350 * 0.8 = 280
+        // Phase 3: Rút 20% của phase 2
+        phaseSizes[3] = phaseSizes[2] * 0.8; // 280 * 0.8 = 224
+        // Phase 4: Rút 20% của phase 3
+        phaseSizes[4] = phaseSizes[3] * 0.8; // 224 * 0.8 = 179.2
+        // Phase 5: Rút còn borderFinalSize (5 block)
+        phaseSizes[5] = borderFinalSize; // 5 block
+        // Phase 6: Giữ borderFinalSize
+        phaseSizes[6] = borderFinalSize; // 5 block
+
         for (int i = 1; i <= numberOfPhases; i++) {
-            // Sử dụng công thức giảm dần phi tuyến
-            if (i == numberOfPhases) {
-                // Phase cuối cùng luôn đạt đến kích thước cuối
-                phaseSizes[i] = borderFinalSize;
-            } else {
-                // Các phase trước sẽ giảm theo tỷ lệ dần dần
-                double factor = Math.pow(borderShrinkFactor, i);
-                phaseSizes[i] = Math.max(borderInitialSize * factor, borderFinalSize);
-            }
             plugin.getLogger().info("Phase " + i + " size calculated: " + phaseSizes[i]);
         }
 
@@ -504,7 +515,8 @@ public class BattlegroundManager {
                 phase++;
                 if (phase <= numberOfPhases) {
                     double newSize = phaseSizes[phase];
-                    long shrinkTime = 30L; // Thời gian thu nhỏ là 30 giây
+                    long shrinkTime = phase >= numberOfPhases - 1 ? 60L : 30L; // 60 giây cho phase 5 và 6, 30 giây cho
+                                                                               // các phase trước
 
                     border.setSize(newSize, shrinkTime);
                     currentPhase = phase;
@@ -530,7 +542,15 @@ public class BattlegroundManager {
                     plugin.getLogger().info("Phase " + phase + "/" + numberOfPhases +
                             ": size=" + String.format("%.1f", newSize));
 
-                    // Khi đến phase cuối, chuẩn bị chuyển sang phase overtime
+                    // Thông báo trước khi vào phase cuối (phase 6)
+                    if (phase == numberOfPhases - 1) {
+                        Bukkit.broadcastMessage(
+                                ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                                        + ChatColor.RED + "CẢNH BÁO: Vòng bo cuối cùng sẽ bắt đầu sau "
+                                        + formatTime(timePerPhase / 20) + "!");
+                    }
+
+                    // Khi đến phase cuối (phase 6), chuyển sang phase overtime
                     if (phase == numberOfPhases) {
                         startFinalPhase();
                         cancel(); // Dừng task này vì đã chuyển sang phase cuối
@@ -583,6 +603,13 @@ public class BattlegroundManager {
                             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 1.0f, 1.0f);
                         }
                     }
+                }
+
+                // Thông báo bổ sung khi còn 30 giây
+                if (countdown == 30) {
+                    Bukkit.broadcastMessage(
+                            ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                                    + ChatColor.RED + "CẢNH BÁO: Toàn map sẽ gây sát thương sau 30 giây!");
                 }
 
                 // Khi hết thời gian, chuyển sang phase overtime
@@ -776,13 +803,22 @@ public class BattlegroundManager {
             borderBar = null;
         }
 
+        // Hủy tất cả các task
+        if (countdownTask != null) {
+            countdownTask.cancel();
+            countdownTask = null;
+        }
+        if (startCheckTask != null) {
+            startCheckTask.cancel();
+            startCheckTask = null;
+        }
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
             }
         }
 
-        List<Player> playersToRemove = new ArrayList<>(participants); // Fixed line
+        List<Player> playersToRemove = new ArrayList<>(participants);
         for (Player p : playersToRemove) {
             if (p.isOnline()) {
                 p.setGameMode(GameMode.SURVIVAL);
@@ -810,11 +846,6 @@ public class BattlegroundManager {
         isJoinOpen = false;
         startTime = -1;
         currentPhase = 0;
-
-        if (countdownTask != null) {
-            countdownTask.cancel();
-            countdownTask = null;
-        }
 
         Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                 + ChatColor.GOLD + "Battleground đã kết thúc!");
@@ -1144,7 +1175,8 @@ public class BattlegroundManager {
         if (border != null) {
             status.append(ChatColor.WHITE + "• Kích thước Border: " + ChatColor.YELLOW
                     + String.format("%.1f", border.getSize()) + "\n");
-            status.append(ChatColor.WHITE + "• Giai đoạn: " + ChatColor.YELLOW + currentPhase + "/4\n");
+            status.append(
+                    ChatColor.WHITE + "• Giai đoạn: " + ChatColor.YELLOW + currentPhase + "/" + numberOfPhases + "\n");
         }
 
         long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
@@ -1252,6 +1284,5 @@ public class BattlegroundManager {
             autoSaveTask.cancel();
         }
         saveKillData();
-        vanishedArmor.clear();
     }
 }
