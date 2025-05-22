@@ -244,27 +244,7 @@ public class BattlegroundCommand implements CommandExecutor {
                 } catch (NumberFormatException e) {
                     sender.sendMessage(ChatColor.RED + "Kích thước phải là số!");
                 }
-            } else if (args[1].equalsIgnoreCase("pause")) {
-                if (!sender.hasPermission("battleground.admin")) {
-                    sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
-                    return true;
-                }
-                if (bgManager.toggleBorderPause()) {
-                    sender.sendMessage(ChatColor.GREEN + "Đã tạm dừng thu nhỏ border!");
-                } else {
-                    sender.sendMessage(ChatColor.RED + "Không thể tạm dừng border!");
-                }
-                return true;
-            } else if (args[1].equalsIgnoreCase("resume")) {
-                if (!sender.hasPermission("battleground.admin")) {
-                    sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
-                    return true;
-                }
-                if (bgManager.toggleBorderPause()) {
-                    sender.sendMessage(ChatColor.GREEN + "Đã tiếp tục thu nhỏ border!");
-                } else {
-                    sender.sendMessage(ChatColor.RED + "Không thể tiếp tục thu nhỏ border!");
-                }
+
                 return true;
             } else if (args[1].equalsIgnoreCase("end")) {
                 if (!sender.hasPermission("battleground.admin")) {

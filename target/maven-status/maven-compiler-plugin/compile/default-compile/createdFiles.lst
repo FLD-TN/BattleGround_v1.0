@@ -3,12 +3,14 @@ me\test\project\pluginso1\listeners\TeleportListener.class
 me\test\project\pluginso1\BattlegroundManager$9.class
 me\test\project\pluginso1\BattlegroundManager$12.class
 me\test\project\pluginso1\BattlegroundManager$14.class
+me\test\project\pluginso1\BattlegroundManager$8$2.class
 me\test\project\pluginso1\BattlegroundManager$7.class
 me\test\project\pluginso1\listeners\PlayerListener.class
 me\test\project\pluginso1\BattlegroundManager$4.class
 me\test\project\pluginso1\Main.class
 me\test\project\pluginso1\BattlegroundManager.class
 me\test\project\pluginso1\BattlegroundManager$6.class
+me\test\project\pluginso1\BattlegroundManager$8$3.class
 me\test\project\pluginso1\BattlegroundManager$1.class
 me\test\project\pluginso1\BattlegroundManager$11.class
 me\test\project\pluginso1\BattlegroundManager$8.class
@@ -16,6 +18,7 @@ me\test\project\pluginso1\listeners\DeathListener.class
 me\test\project\pluginso1\listeners\WorldListener.class
 me\test\project\pluginso1\BattlegroundManager$13.class
 me\test\project\pluginso1\BattlegroundManager$3.class
+me\test\project\pluginso1\BattlegroundManager$8$1.class
 me\test\project\pluginso1\commands\BattlegroundCommand.class
 me\test\project\pluginso1\BattlegroundManager$5.class
 me\test\project\pluginso1\BattlegroundManager$10.class

@@ -28,6 +28,7 @@ public class BattlegroundManager {
     private BukkitTask startCheckTask;
     private WorldBorder border;
     private Location lobbyLocation;
+    private long phaseStartTime;
     private Location mapCenter;
     private int matchDuration; // In seconds
     private int invincibilityDuration;
@@ -52,6 +53,7 @@ public class BattlegroundManager {
     private boolean isCountingDown = false;
     private final Map<Player, ItemStack[]> vanishedArmor = new HashMap<>();
     private boolean isJoinOpen = false;
+    private boolean isBorderShrinking = false; // New flag to track border shrinking
 
     public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
@@ -71,16 +73,15 @@ public class BattlegroundManager {
         try {
             lobbyLocation = parseConfigLocation("lobby-location");
             mapCenter = parseConfigLocation("map-center");
-            matchDuration = plugin.getConfig().getInt("match-duration", 600);
-            invincibilityDuration = plugin.getConfig().getInt("invincibility-duration", 30);
-            borderInitialSize = plugin.getConfig().getDouble("border-initial-size", 500.0);
-            borderFinalSize = plugin.getConfig().getDouble("border-final-size", 5.0);
-            minPlayers = plugin.getConfig().getInt("min-players", 2);
-            numberOfPhases = plugin.getConfig().getInt("number-of-phases", 6); // Tăng lên 6 phase
-            borderShrinkFactor = plugin.getConfig().getDouble("border-shrink-factor", 0.85); // Giữ nguyên để tương
-                                                                                             // thích
-            borderCenterOffset = plugin.getConfig().getDouble("border-random-offset", 50.0);
-            finalPhaseDuration = plugin.getConfig().getInt("final-phase-duration", 120); // 120 giây cho phase cuối
+            matchDuration = plugin.getConfig().getInt("settings.match-duration", 600); // Default: 10 minutes
+            invincibilityDuration = plugin.getConfig().getInt("settings.invincibility-duration", 60);
+            borderInitialSize = plugin.getConfig().getDouble("settings.border-initial-size", 500.0);
+            borderFinalSize = plugin.getConfig().getDouble("settings.border-final-size", 5.0);
+            minPlayers = plugin.getConfig().getInt("settings.min-players", 2);
+            numberOfPhases = plugin.getConfig().getInt("settings.number-of-phases", 6);
+            borderShrinkFactor = plugin.getConfig().getDouble("settings.border-shrink-factor", 0.85);
+            borderCenterOffset = plugin.getConfig().getDouble("settings.border-center-offset", 200.0);
+            finalPhaseDuration = plugin.getConfig().getInt("settings.final-phase-duration", 120);
 
             if (borderInitialSize <= 0) {
                 borderInitialSize = 500.0;
@@ -118,28 +119,31 @@ public class BattlegroundManager {
     }
 
     private Location parseConfigLocation(String path) {
-        String worldName = plugin.getConfig().getString(path + ".world", "lobby");
+        String worldName = plugin.getConfig().getString(path + ".world", "warp_wheat");
         World world = Bukkit.getWorld(worldName);
         if (world == null) {
             plugin.getLogger().warning("World '" + worldName + "' not found for " + path);
             world = Bukkit.getWorlds().get(0);
+            plugin.getLogger().info("Available worlds: "
+                    + Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.joining(", ")));
         }
-        return new Location(
-                world,
-                plugin.getConfig().getDouble(path + ".x", 0),
-                plugin.getConfig().getDouble(path + ".y", 100),
-                plugin.getConfig().getDouble(path + ".z", 0));
+        double x = plugin.getConfig().getDouble(path + ".x", 0);
+        double y = plugin.getConfig().getDouble(path + ".y", 100);
+        double z = plugin.getConfig().getDouble(path + ".z", 0);
+        float yaw = (float) plugin.getConfig().getDouble(path + ".yaw", 0.0);
+        float pitch = (float) plugin.getConfig().getDouble(path + ".pitch", 0.0);
+        plugin.getLogger().info("Loaded " + path + " at " + world.getName() + ": x=" + x + ", y=" + y + ", z=" + z);
+        return new Location(world, x, y, z, yaw, pitch);
     }
 
     private void scheduleStartCheck() {
         startCheckTask = new BukkitRunnable() {
             @Override
             public void run() {
-                if (!isRunning && !isCountingDown && startTime > 0 && System.currentTimeMillis() / 1000 >= startTime) {
+                if (!isRunning && startTime > 0 && System.currentTimeMillis() / 1000 >= startTime) {
                     plugin.getLogger().info("Start check triggered, calling start()");
                     start();
                     startTime = -1;
-                    cancel(); // Hủy task ngay sau khi gọi start()
                 }
             }
         }.runTaskTimer(plugin, 0L, 20L);
@@ -153,7 +157,7 @@ public class BattlegroundManager {
         }
         if (!isRunning && !participants.contains(player)) {
             participants.add(player);
-            String addCommand = "rg addmember -w lobby __global__ " + player.getName();
+            String addCommand = "rg addmember -w warp_wheat __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), addCommand);
             plugin.getLogger().info("Executing command: " + addCommand + " (success: " + success + ")");
 
@@ -170,7 +174,7 @@ public class BattlegroundManager {
 
     public void unregisterPlayer(Player player) {
         if (participants.remove(player)) {
-            String removeCommand = "rg removemember -w lobby __global__ " + player.getName();
+            String removeCommand = "rg removemember -w warp_wheat __global__ " + player.getName();
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), removeCommand);
             plugin.getLogger().info("Executing command: " + removeCommand + " (success: " + success + ")");
             player.setGameMode(GameMode.SURVIVAL);
@@ -178,7 +182,6 @@ public class BattlegroundManager {
             player.teleport(Bukkit.getWorld("world").getSpawnLocation());
             player.sendMessage(ChatColor.YELLOW + "Bạn đã rời khỏi Battleground!");
             plugin.getLogger().info("Player " + player.getName() + " unregistered and reset to survival mode");
-            // Execute /board command twice to refresh scoreboard
             new BukkitRunnable() {
                 @Override
                 public void run() {
@@ -240,10 +243,10 @@ public class BattlegroundManager {
     }
 
     public void start() {
-        if (isRunning || isCountingDown) {
+        if (isRunning) {
             Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                    + ChatColor.RED + "Trận đã bắt đầu hoặc đang đếm ngược!");
-            plugin.getLogger().warning("Start called while match is running or counting down!");
+                    + ChatColor.RED + "Trận đã bắt đầu!");
+            plugin.getLogger().warning("Start called while match is already running!");
             return;
         }
         if (participants.size() < minPlayers) {
@@ -254,7 +257,7 @@ public class BattlegroundManager {
         }
         isRunning = true;
         isCountingDown = true;
-        isJoinOpen = false; // Close joining when match starts
+        isJoinOpen = false;
         startTime = -1;
         kills.clear();
 
@@ -290,34 +293,135 @@ public class BattlegroundManager {
 
             @Override
             public void run() {
-                if (!isRunning) {
-                    plugin.getLogger().info("Countdown cancelled due to match not running");
-                    cancel();
-                    return;
-                }
                 if (countdown > 10) {
-                    if (countdown % 10 == 0) { // Thông báo mỗi 10 giây
+                    if (countdown % 10 == 0) {
                         Bukkit.broadcastMessage(
                                 ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
                                         + "] " + ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
-                        updateCountdownScoreboard(countdown);
+                        updateCountdownScoreboard(countdown, false);
                     }
-                } else if (countdown > 0) { // Đếm ngược từng giây khi còn 10 giây
+                } else if (countdown > 0) {
                     Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
                             + "] " + ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
-                    updateCountdownScoreboard(countdown);
-                } else { // Khi countdown = 0
+                    updateCountdownScoreboard(countdown, false);
+                } else {
                     isCountingDown = false;
-                    startMatch();
+                    startInvincibilityPhase();
                     cancel();
-                    plugin.getLogger().info("Countdown finished, match started");
+                    plugin.getLogger().info("Countdown finished, invincibility phase started");
                 }
                 countdown--;
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
 
-    private void updateCountdownScoreboard(int countdown) {
+    private void startInvincibilityPhase() {
+        World world = mapCenter.getWorld();
+        border = world.getWorldBorder();
+        border.reset();
+
+        Location borderCenter = mapCenter.clone();
+        if (borderCenterOffset > 0) {
+            Random rand = new Random();
+            double offsetX = (rand.nextDouble() - 0.5) * borderCenterOffset;
+            double offsetZ = (rand.nextDouble() - 0.5) * borderCenterOffset;
+            borderCenter.add(offsetX, 0, offsetZ);
+            plugin.getLogger()
+                    .info("Randomized border center: x=" + borderCenter.getX() + ", z=" + borderCenter.getZ());
+        }
+
+        border.setCenter(borderCenter);
+        border.setSize(borderInitialSize);
+        border.setDamageAmount(5.0);
+        border.setDamageBuffer(0.0);
+        border.setWarningDistance(5);
+        border.setWarningTime(15);
+        plugin.getLogger()
+                .info("Border set to initial size: " + borderInitialSize + ", center: " + borderCenter.toVector());
+
+        String playerList = participants.stream()
+                .map(Player::getName)
+                .collect(Collectors.joining(", "));
+
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            p.sendTitle(
+                    ChatColor.GOLD + "⚔ BATTLEGROUND ⚔",
+                    ChatColor.YELLOW + "Thời gian bất tử bắt đầu!",
+                    20, 100, 20);
+
+            if (participants.contains(p)) {
+                p.sendMessage("");
+                p.sendMessage(ChatColor.GOLD + "✦ BATTLEGROUND ✦");
+                p.sendMessage(ChatColor.WHITE + "• Người chơi: " + ChatColor.YELLOW + playerList);
+                p.sendMessage(ChatColor.WHITE + "• Border: " + ChatColor.YELLOW
+                        + String.format("%.1f", borderInitialSize) + " blocks");
+                p.sendMessage(ChatColor.WHITE + "• Tâm vòng bo: " + ChatColor.YELLOW
+                        + String.format("x=%.1f, z=%.1f", borderCenter.getX(), borderCenter.getZ()));
+                p.sendMessage(ChatColor.WHITE + "• Bất tử: " + ChatColor.GREEN + invincibilityDuration + " giây");
+                p.sendMessage("");
+            }
+        }
+
+        for (Player p : participants) {
+            if (p.isOnline()) {
+                p.teleport(borderCenter.clone().add(0, 10, 0));
+                p.setInvulnerable(true);
+                p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                        + ChatColor.GREEN + "Bạn đang trong thời gian bất tử!");
+                p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 8 * 20, 0));
+                p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
+                plugin.getLogger().info("Teleported " + p.getName() + " to invincibility phase location: " +
+                        borderCenter.getWorld().getName() + " x=" + borderCenter.getX() + ", y="
+                        + (borderCenter.getY() + 10) + ", z=" + borderCenter.getZ());
+            }
+        }
+
+        // Invincibility countdown
+        new BukkitRunnable() {
+            int countdown = invincibilityDuration;
+
+            @Override
+            public void run() {
+                if (countdown <= 0) {
+                    for (Player p : participants) {
+                        if (p.isOnline()) {
+                            p.setInvulnerable(false);
+                            p.removePotionEffect(PotionEffectType.SLOW_FALLING);
+                            p.removePotionEffect(PotionEffectType.SPEED);
+                            p.removePotionEffect(PotionEffectType.INVISIBILITY);
+                            p.removePotionEffect(PotionEffectType.REGENERATION);
+                            p.sendMessage(
+                                    ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                                            + ChatColor.RED + "Bất tử đã hết, trận đấu bắt đầu!");
+                            p.sendTitle(
+                                    ChatColor.RED + "⚠ Thời gian bất tử đã hết ⚠",
+                                    ChatColor.RED + "Trận Chiến Bắt Đầu!",
+                                    10, 60, 20);
+                            plugin.getLogger().info("Disabled invulnerability for " + p.getName());
+                        }
+                    }
+                    // Ensure PvP is enabled in warp_wheat
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "rg flag -w warp_wheat __global__ pvp allow");
+                    plugin.getLogger().info("Set PvP to allow in warp_wheat");
+                    startMatch();
+                    cancel();
+                    plugin.getLogger().info("Invincibility phase ended, starting main match");
+                } else {
+                    updateCountdownScoreboard(countdown, true);
+                    if (countdown == 30 || countdown == 20 || countdown == 10 || countdown <= 5) {
+                        Bukkit.broadcastMessage(
+                                ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                                        + ChatColor.YELLOW + "Thời gian bất tử còn lại: " + countdown + " giây!");
+                    }
+                }
+                countdown--;
+            }
+        }.runTaskTimer(plugin, 0L, 20L);
+    }
+
+    private void updateCountdownScoreboard(int countdown, boolean isInvincibility) {
         Objective objective = gameScoreboard.getObjective("bginfo");
         if (objective != null) {
             objective.unregister();
@@ -326,7 +430,11 @@ public class BattlegroundManager {
         objective.setDisplaySlot(DisplaySlot.SIDEBAR);
 
         int score = 15;
-        objective.getScore(ChatColor.YELLOW + "Bắt đầu trong: " + formatTime(countdown)).setScore(score--);
+        if (isInvincibility) {
+            objective.getScore(ChatColor.YELLOW + "Bất tử còn lại: " + formatTime(countdown)).setScore(score--);
+        } else {
+            objective.getScore(ChatColor.YELLOW + "Bắt đầu trong: " + formatTime(countdown)).setScore(score--);
+        }
         objective.getScore("").setScore(score--);
         objective.getScore(ChatColor.WHITE + "⚔ Số người tham gia: " + participants.size()).setScore(score--);
 
@@ -343,37 +451,13 @@ public class BattlegroundManager {
     }
 
     private void startMatch() {
-        if (!isRunning || isCountingDown) {
-            plugin.getLogger().warning("startMatch called while match is not running or still counting down, ignoring");
+        if (!isRunning) {
+            plugin.getLogger().warning("startMatch called while match is not running, ignoring");
             return;
         }
-        plugin.getLogger().info("Starting match with " + participants.size() + " players");
-
         matchStartTime = System.currentTimeMillis() / 1000;
-        World world = mapCenter.getWorld();
-        border = world.getWorldBorder();
-        border.reset();
-
-        // Calculate random border center at match start
-        Location borderCenter = mapCenter.clone();
-        if (borderCenterOffset > 0) {
-            Random rand = new Random();
-            double offsetX = (rand.nextDouble() - 0.5) * borderCenterOffset;
-            double offsetZ = (rand.nextDouble() - 0.5) * borderCenterOffset;
-            borderCenter.add(offsetX, 0, offsetZ);
-            plugin.getLogger()
-                    .info("Randomized border center: x=" + borderCenter.getX() + ", z=" + borderCenter.getZ());
-        }
-
-        border.setCenter(borderCenter);
-        border.setSize(borderInitialSize);
-        border.setDamageAmount(5.0);
-        border.setDamageBuffer(0.0);
-        border.setWarningDistance(5); // Increased for better visibility
-        border.setWarningTime(15); // Warning time in seconds
-        plugin.getLogger()
-                .info("Border set to initial size: " + borderInitialSize + ", center: " + borderCenter.toVector());
-
+        currentPhase = 1; // Start at Phase 1
+        phaseStartTime = matchStartTime; // Set initial phase start time for stable period
         createBorderBar();
         updateBorderBar();
         showBorderParticles();
@@ -391,69 +475,9 @@ public class BattlegroundManager {
             }
         }.runTaskTimer(plugin, 20L, 20L);
 
-        String playerList = participants.stream()
-                .map(Player::getName)
-                .collect(Collectors.joining(", "));
+        long timePerPhase = matchDuration / numberOfPhases; // In seconds
+        startBorderPhases(timePerPhase * 20L); // Convert to ticks
 
-        for (Player p : Bukkit.getOnlinePlayers()) {
-            p.sendTitle(
-                    ChatColor.GOLD + "⚔ BATTLEGROUND ⚔",
-                    ChatColor.YELLOW + "Trận đấu bắt đầu!",
-                    20, 100, 20);
-
-            if (participants.contains(p)) {
-                p.sendMessage("");
-                p.sendMessage(ChatColor.GOLD + "✦ BATTLEGROUND ✦");
-                p.sendMessage(ChatColor.WHITE + "• Người chơi: " + ChatColor.YELLOW + playerList);
-                p.sendMessage(ChatColor.WHITE + "• Border: " + ChatColor.YELLOW
-                        + String.format("%.1f", borderInitialSize) + " blocks");
-                p.sendMessage(ChatColor.WHITE + "• Tâm vòng bo: " + ChatColor.YELLOW
-                        + String.format("x=%.1f, z=%.1f", borderCenter.getX(), borderCenter.getZ()));
-                p.sendMessage(ChatColor.WHITE + "• Thời gian: " + ChatColor.YELLOW + formatTime(matchDuration));
-                p.sendMessage(ChatColor.WHITE + "• Bất tử: " + ChatColor.GREEN + invincibilityDuration + " giây");
-                p.sendMessage("");
-            }
-        }
-
-        for (Player p : participants) {
-            if (p.isOnline()) {
-                p.teleport(borderCenter.clone().add(0, 10, 0)); // Teleport to randomized border center
-                p.setInvulnerable(true);
-                p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                        + ChatColor.GREEN + "Bạn đã vào trận Battleground!");
-                p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 8 * 20, 0));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
-                plugin.getLogger().info("Teleported " + p.getName() + " to match start location and applied effects");
-            }
-        }
-
-        // Schedule end of invincibility period
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (Player p : participants) {
-                    if (p.isOnline()) {
-                        p.setInvulnerable(false);
-                        p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                                + ChatColor.RED + "Bất tử đã hết, trận đấu bắt đầu!");
-                        p.sendTitle(
-                                ChatColor.RED + "⚠ Thời gian bất tử đã hết ⚠",
-                                ChatColor.RED + "Trận Chiến Bắt Đầu!",
-                                10, 60, 20);
-                    }
-                }
-            }
-        }.runTaskLater(plugin, invincibilityDuration * 20L);
-
-        // Tính toán thời gian cho mỗi phase (chia đều)
-        long timePerPhase = (matchDuration * 20L) / numberOfPhases;
-
-        // Quản lý các phase chính của border
-        startBorderPhases(timePerPhase);
-
-        // Kiểm tra người thắng cuộc liên tục
         new BukkitRunnable() {
             @Override
             public void run() {
@@ -479,29 +503,27 @@ public class BattlegroundManager {
         }.runTaskTimer(plugin, 0L, 20L);
     }
 
-    private void startBorderPhases(long timePerPhase) {
-        // Tính toán kích thước border cho mỗi phase
+    private void startBorderPhases(long timePerPhaseTicks) {
         double[] phaseSizes = new double[numberOfPhases + 1];
         phaseSizes[0] = borderInitialSize;
 
-        // Phase 1: Rút 30%
-        phaseSizes[1] = borderInitialSize * 0.7; // 500 * 0.7 = 350
-        // Phase 2: Rút 20% của phase 1
-        phaseSizes[2] = phaseSizes[1] * 0.8; // 350 * 0.8 = 280
-        // Phase 3: Rút 20% của phase 2
-        phaseSizes[3] = phaseSizes[2] * 0.8; // 280 * 0.8 = 224
-        // Phase 4: Rút 20% của phase 3
-        phaseSizes[4] = phaseSizes[3] * 0.8; // 224 * 0.8 = 179.2
-        // Phase 5: Rút còn borderFinalSize (5 block)
-        phaseSizes[5] = borderFinalSize; // 5 block
-        // Phase 6: Giữ borderFinalSize
-        phaseSizes[6] = borderFinalSize; // 5 block
+        // Percentage reductions for Phases 1-5
+        double[] reductions = { 0.30, 0.20, 0.20, 0.10, 0.15 };
+        double cumulativeReduction = 0.0;
 
         for (int i = 1; i <= numberOfPhases; i++) {
+            if (i == numberOfPhases) {
+                phaseSizes[i] = borderFinalSize; // Phase 6: Final size (5 blocks)
+            } else {
+                cumulativeReduction += reductions[i - 1];
+                phaseSizes[i] = borderInitialSize * (1 - cumulativeReduction);
+            }
             plugin.getLogger().info("Phase " + i + " size calculated: " + phaseSizes[i]);
         }
 
-        // Tạo task để quản lý các phase của border
+        final long shrinkTime = 30L; // 30 seconds to shrink
+        final long stableTime = (timePerPhaseTicks / 20L) - shrinkTime; // Stable period in seconds
+
         new BukkitRunnable() {
             int phase = 0;
 
@@ -512,14 +534,53 @@ public class BattlegroundManager {
                     return;
                 }
 
-                phase++;
-                if (phase <= numberOfPhases) {
-                    double newSize = phaseSizes[phase];
-                    long shrinkTime = phase >= numberOfPhases - 1 ? 60L : 30L; // 60 giây cho phase 5 và 6, 30 giây cho
-                                                                               // các phase trước
+                if (phase == 0) {
+                    // Initial shrink for Phase 1
+                    double newSize = phaseSizes[1];
+                    currentPhase = 1;
+                    isBorderShrinking = true;
 
                     border.setSize(newSize, shrinkTime);
+                    phaseStartTime = (System.currentTimeMillis() / 1000) + shrinkTime; // Set after shrink
+
+                    String message = ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                            + ChatColor.GOLD + "Border đang thu nhỏ!\n" +
+                            ChatColor.YELLOW + "Kích thước mới: " + String.format("%.1f", newSize) + " blocks";
+
+                    for (Player p : participants) {
+                        if (p.isOnline()) {
+                            p.sendTitle(
+                                    ChatColor.RED + "⚠ Border thu nhỏ ⚠",
+                                    ChatColor.YELLOW + "Kích thước mới: " + String.format("%.1f", newSize) + " Blocks",
+                                    10, 60, 20);
+                            p.sendMessage(ChatColor.YELLOW + "Giai đoạn " + 1 + "/" + numberOfPhases);
+                        }
+                    }
+
+                    Bukkit.broadcastMessage(message);
+                    showBorderParticles();
+                    createBorderBar();
+                    updateBorderBar();
+                    plugin.getLogger().info("Phase 1/" + numberOfPhases +
+                            ": size=" + String.format("%.1f", newSize));
+
+                    new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            isBorderShrinking = false;
+                            plugin.getLogger().info("Border shrink completed for phase 1");
+                        }
+                    }.runTaskLater(plugin, shrinkTime * 20L);
+                }
+
+                phase++;
+                if (phase >= 2 && phase <= numberOfPhases) {
+                    double newSize = phaseSizes[phase];
                     currentPhase = phase;
+                    isBorderShrinking = true;
+
+                    border.setSize(newSize, shrinkTime);
+                    phaseStartTime = (System.currentTimeMillis() / 1000) + shrinkTime;
 
                     String message = ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                             + ChatColor.GOLD + "Border đang thu nhỏ!\n" +
@@ -542,22 +603,26 @@ public class BattlegroundManager {
                     plugin.getLogger().info("Phase " + phase + "/" + numberOfPhases +
                             ": size=" + String.format("%.1f", newSize));
 
-                    // Thông báo trước khi vào phase cuối (phase 6)
-                    if (phase == numberOfPhases - 1) {
-                        Bukkit.broadcastMessage(
-                                ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                                        + ChatColor.RED + "CẢNH BÁO: Vòng bo cuối cùng sẽ bắt đầu sau "
-                                        + formatTime(timePerPhase / 20) + "!");
-                    }
+                    new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            isBorderShrinking = false;
+                            plugin.getLogger().info("Border shrink completed for phase " + phase);
+                        }
+                    }.runTaskLater(plugin, shrinkTime * 20L);
 
-                    // Khi đến phase cuối (phase 6), chuyển sang phase overtime
                     if (phase == numberOfPhases) {
-                        startFinalPhase();
-                        cancel(); // Dừng task này vì đã chuyển sang phase cuối
+                        new BukkitRunnable() {
+                            @Override
+                            public void run() {
+                                startFinalPhase();
+                            }
+                        }.runTaskLater(plugin, stableTime * 20L);
+                        cancel();
                     }
                 }
             }
-        }.runTaskTimer(plugin, timePerPhase, timePerPhase);
+        }.runTaskTimer(plugin, 0L, timePerPhaseTicks);
     }
 
     private void startFinalPhase() {
@@ -579,7 +644,6 @@ public class BattlegroundManager {
         showBorderParticles();
         updateBorderBar();
 
-        // Tạo countdown cho phase cuối
         new BukkitRunnable() {
             int countdown = finalPhaseDuration;
 
@@ -592,7 +656,6 @@ public class BattlegroundManager {
 
                 countdown--;
 
-                // Thông báo thời gian còn lại theo khoảng thời gian
                 if (countdown == 30 || countdown == 20 || countdown == 10 || (countdown > 0 && countdown <= 5)) {
                     Bukkit.broadcastMessage(
                             ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
@@ -605,14 +668,6 @@ public class BattlegroundManager {
                     }
                 }
 
-                // Thông báo bổ sung khi còn 30 giây
-                if (countdown == 30) {
-                    Bukkit.broadcastMessage(
-                            ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                                    + ChatColor.RED + "CẢNH BÁO: Toàn map sẽ gây sát thương sau 30 giây!");
-                }
-
-                // Khi hết thời gian, chuyển sang phase overtime
                 if (countdown <= 0) {
                     startOvertimePhase();
                     cancel();
@@ -622,11 +677,9 @@ public class BattlegroundManager {
     }
 
     private void startOvertimePhase() {
-        // Xóa border hiện tại
         border.reset();
         border = null;
 
-        // Thông báo cho người chơi
         Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                 + ChatColor.RED + "TỬ CHIẾN: Toàn bộ bản đồ sẽ chịu sát thương!");
 
@@ -640,7 +693,6 @@ public class BattlegroundManager {
             }
         }
 
-        // Tạo task gây sát thương toàn map
         new BukkitRunnable() {
             int damagePhase = 0;
 
@@ -652,9 +704,8 @@ public class BattlegroundManager {
                 }
 
                 damagePhase++;
-                double damage = 1.0; // Sát thương cơ bản
+                double damage = 1.0;
 
-                // Tăng sát thương theo thời gian
                 if (damagePhase > 10) {
                     damage = 2.0;
                 }
@@ -665,11 +716,9 @@ public class BattlegroundManager {
                     damage = 8.0;
                 }
 
-                // Gây sát thương cho tất cả người chơi
                 for (Player p : participants) {
                     if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
                         p.damage(damage);
-                        // Hiệu ứng hình ảnh cho đẹp
                         p.getWorld().spawnParticle(Particle.DAMAGE_INDICATOR, p.getLocation().add(0, 1, 0), 5, 0.5, 0.5,
                                 0.5, 0.01);
                     }
@@ -685,7 +734,7 @@ public class BattlegroundManager {
         borderBar = Bukkit.createBossBar(
                 ChatColor.GOLD + "Vòng Bo: " + String.format("%.1f", border.getSize()) + " blocks",
                 BarColor.YELLOW,
-                BarStyle.SEGMENTED_10); // Segmented for better visual
+                BarStyle.SEGMENTED_10);
         for (Player p : participants) {
             borderBar.addPlayer(p);
         }
@@ -710,8 +759,7 @@ public class BattlegroundManager {
         Location center = border.getCenter();
         World world = center.getWorld();
 
-        // Optimize particle spawning (reduce frequency)
-        for (double x = -size; x <= size; x += 5) { // Increased step size to 5
+        for (double x = -size; x <= size; x += 5) {
             spawnBorderParticle(world, center.clone().add(x, 0, -size));
             spawnBorderParticle(world, center.clone().add(x, 0, size));
         }
@@ -723,7 +771,6 @@ public class BattlegroundManager {
     }
 
     private void spawnBorderParticle(World world, Location loc) {
-        // Spawn particles only at player height to reduce lag
         for (double y = loc.getY(); y <= loc.getY() + 5; y += 2) {
             world.spawnParticle(Particle.END_ROD, loc.clone().add(0, y, 0), 1, 0, 0, 0, 0);
             world.spawnParticle(Particle.DRAGON_BREATH, loc.clone().add(0, y, 0), 1, 0, 0, 0, 0);
@@ -803,15 +850,6 @@ public class BattlegroundManager {
             borderBar = null;
         }
 
-        // Hủy tất cả các task
-        if (countdownTask != null) {
-            countdownTask.cancel();
-            countdownTask = null;
-        }
-        if (startCheckTask != null) {
-            startCheckTask.cancel();
-            startCheckTask = null;
-        }
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
@@ -846,6 +884,12 @@ public class BattlegroundManager {
         isJoinOpen = false;
         startTime = -1;
         currentPhase = 0;
+        isBorderShrinking = false;
+
+        if (countdownTask != null) {
+            countdownTask.cancel();
+            countdownTask = null;
+        }
 
         Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                 + ChatColor.GOLD + "Battleground đã kết thúc!");
@@ -1103,7 +1147,6 @@ public class BattlegroundManager {
         }
 
         objective.getScore(ChatColor.WHITE + "⚔ Số người tham gia: " + participants.size()).setScore(score--);
-        objective.getScore("");
         objective.getScore(ChatColor.GREEN + " ▸ Còn sống: " + alive).setScore(score--);
         objective.getScore(" ").setScore(score--);
 
@@ -1114,22 +1157,31 @@ public class BattlegroundManager {
                     .setScore(score--);
             objective.getScore(ChatColor.YELLOW + " ▸ Phase: " + currentPhase + "/" + numberOfPhases).setScore(score--);
 
-            long timePerPhase = matchDuration / numberOfPhases;
-            long elapsedTime = (System.currentTimeMillis() / 1000) - matchStartTime;
-            long timeInCurrentPhase = elapsedTime % timePerPhase;
-            long timeToNextPhase = timePerPhase - timeInCurrentPhase;
+            long stableTime = (matchDuration / numberOfPhases) - 30; // Stable period in seconds
+            long timeToNextPhase = 0;
 
-            if (currentPhase < numberOfPhases && timeToNextPhase > 0) {
-                objective.getScore(ChatColor.YELLOW + " ▸ Đợt Bo kế tiếp: " + formatTime(timeToNextPhase))
-                        .setScore(score--);
-            } else if (currentPhase == numberOfPhases) {
-                // Hiển thị thông tin phase overtime nếu đang ở phase cuối
-                objective.getScore(ChatColor.RED + " ▸ Tử Chiến Sắp Diễn Ra!")
-                        .setScore(score--);
+            if (currentPhase == 1 && !isBorderShrinking && phaseStartTime == matchStartTime) {
+                // Initial stable period for Phase 1
+                timeToNextPhase = phaseStartTime + stableTime - (System.currentTimeMillis() / 1000);
+                if (timeToNextPhase > 0) {
+                    objective.getScore(ChatColor.YELLOW + " ▸ Đợt Bo kế tiếp: " + formatTime(timeToNextPhase))
+                            .setScore(score--);
+                }
+            } else if (currentPhase < numberOfPhases) {
+                if (isBorderShrinking) {
+                    objective.getScore(ChatColor.YELLOW + " ▸ Border đang thu nhỏ...").setScore(score--);
+                } else {
+                    timeToNextPhase = phaseStartTime + stableTime - (System.currentTimeMillis() / 1000);
+                    if (timeToNextPhase > 0) {
+                        objective.getScore(ChatColor.YELLOW + " ▸ Đợt Bo kế tiếp: " + formatTime(timeToNextPhase))
+                                .setScore(score--);
+                    }
+                }
+            } else {
+                objective.getScore(ChatColor.RED + " ▸ Tử Chiến Sắp Diễn Ra!").setScore(score--);
             }
             objective.getScore("   ").setScore(score--);
         } else {
-            // Nếu border đã reset (phase overtime)
             objective.getScore(ChatColor.RED + "⚠ TỬ CHIẾN ĐANG DIỄN RA ⚠").setScore(score--);
             objective.getScore("   ").setScore(score--);
         }
@@ -1284,5 +1336,6 @@ public class BattlegroundManager {
             autoSaveTask.cancel();
         }
         saveKillData();
+        vanishedArmor.clear();
     }
 }
