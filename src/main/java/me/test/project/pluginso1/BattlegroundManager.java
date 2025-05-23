@@ -2,6 +2,7 @@ package me.test.project.pluginso1;
 
 import org.bukkit.*;
 import org.bukkit.boss.BossBar;
+import org.bukkit.command.CommandSender;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.entity.Player;
@@ -11,6 +12,17 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.*;
+
+import java.text.SimpleDateFormat;
+import com.mongodb.ConnectionString;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import java.util.concurrent.TimeUnit;
+import org.bson.Document;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,6 +66,15 @@ public class BattlegroundManager {
     private final Map<Player, ItemStack[]> vanishedArmor = new HashMap<>();
     private boolean isJoinOpen = false;
     private boolean isBorderShrinking = false; // New flag to track border shrinking
+    private long finalPhaseCountdown = -1;
+    private Location waitingLobby;
+    private String mongoConnectionString;
+    private String mongoDatabase;
+    private MongoClient mongoClient;
+    private MongoCollection<Document> matchHistoryCollection;
+    private MongoCollection<Document> playerKillsCollection;
+    private String mongoMatchHistoryCollection;
+    private String mongoKillsCollection;
 
     public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
@@ -63,6 +84,7 @@ public class BattlegroundManager {
             plugin.getDataFolder().mkdirs();
         }
         loadConfig();
+        initializeMongoDB();
         loadKillData();
         scheduleStartCheck();
         setupScoreboard();
@@ -73,9 +95,10 @@ public class BattlegroundManager {
         try {
             lobbyLocation = parseConfigLocation("lobby-location");
             mapCenter = parseConfigLocation("map-center");
-            matchDuration = plugin.getConfig().getInt("settings.match-duration", 600); // Default: 10 minutes
+            waitingLobby = parseConfigLocation("waiting-lobby");
+            matchDuration = plugin.getConfig().getInt("settings.match-duration", 300);
             invincibilityDuration = plugin.getConfig().getInt("settings.invincibility-duration", 60);
-            borderInitialSize = plugin.getConfig().getDouble("settings.border-initial-size", 500.0);
+            borderInitialSize = plugin.getConfig().getDouble("settings.border-initial-size", 600.0);
             borderFinalSize = plugin.getConfig().getDouble("settings.border-final-size", 5.0);
             minPlayers = plugin.getConfig().getInt("settings.min-players", 2);
             numberOfPhases = plugin.getConfig().getInt("settings.number-of-phases", 6);
@@ -83,9 +106,50 @@ public class BattlegroundManager {
             borderCenterOffset = plugin.getConfig().getDouble("settings.border-center-offset", 200.0);
             finalPhaseDuration = plugin.getConfig().getInt("settings.final-phase-duration", 120);
 
+            // Load MongoDB config
+            mongoConnectionString = plugin.getConfig().getString("mongodb.connection-string", "");
+            mongoDatabase = plugin.getConfig().getString("mongodb.database", "BattleGroundTopKill");
+            mongoKillsCollection = plugin.getConfig().getString("mongodb.kills-collection", "players_topkills");
+            mongoMatchHistoryCollection = plugin.getConfig().getString("mongodb.match-history-collection",
+                    "match_history");
+
+            if (mongoConnectionString.isEmpty()) {
+                plugin.getLogger()
+                        .warning("MongoDB connection string is missing in config. Disabling MongoDB features.");
+            } else {
+                plugin.getLogger().info("MongoDB configured: database=" + mongoDatabase +
+                        ", kills-collection=" + mongoKillsCollection +
+                        ", match-history-collection=" + mongoMatchHistoryCollection);
+            }
+
+            // Validate waiting lobby
+            World defaultWorld = mapCenter != null && mapCenter.getWorld() != null ? mapCenter.getWorld()
+                    : Bukkit.getWorld("warp_wheat");
+            if (waitingLobby == null || waitingLobby.getWorld() == null) {
+                waitingLobby = new Location(defaultWorld != null ? defaultWorld : Bukkit.getWorlds().get(0),
+                        365.565, 207, -40.461, 0, 0);
+                plugin.getLogger()
+                        .warning("Invalid waiting-lobby in config, defaulting to x=365.565, y=207, z=-40.461");
+            }
+
+            // Check if waitingLobby is within border
+            if (mapCenter != null && waitingLobby != null) {
+                double distance = Math.sqrt(Math.pow(waitingLobby.getX() - mapCenter.getX(), 2)
+                        + Math.pow(waitingLobby.getZ() - mapCenter.getZ(), 2));
+                if (distance > borderInitialSize / 2) {
+                    plugin.getLogger()
+                            .warning("Waiting lobby is outside initial border! Distance from map center: "
+                                    + String.format("%.1f", distance) + ", Border radius: "
+                                    + String.format("%.1f", borderInitialSize / 2));
+                    Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
+                            + "] " + ChatColor.RED + "Cảnh báo: Sảnh chờ ngoài vòng bo!");
+                }
+            }
+
+            // Validate other config values
             if (borderInitialSize <= 0) {
-                borderInitialSize = 500.0;
-                plugin.getLogger().warning("Invalid border-initial-size in config, defaulting to 500");
+                borderInitialSize = 600.0;
+                plugin.getLogger().warning("Invalid border-initial-size in config, defaulting to 600");
             }
             if (borderFinalSize <= 0) {
                 borderFinalSize = 5.0;
@@ -99,6 +163,7 @@ public class BattlegroundManager {
                 finalPhaseDuration = 120;
                 plugin.getLogger().warning("Invalid final-phase-duration in config, defaulting to 120");
             }
+
             plugin.getLogger().info(
                     "Loaded config: border-initial-size=" + borderInitialSize +
                             ", border-final-size=" + borderFinalSize +
@@ -106,33 +171,43 @@ public class BattlegroundManager {
                             ", number-of-phases=" + numberOfPhases +
                             ", border-shrink-factor=" + borderShrinkFactor +
                             ", border-center-offset=" + borderCenterOffset +
-                            ", final-phase-duration=" + finalPhaseDuration);
+                            ", final-phase-duration=" + finalPhaseDuration +
+                            ", waiting-lobby=" + waitingLobby.toString());
         } catch (Exception e) {
             plugin.getLogger().severe("Error loading config: " + e.getMessage());
             e.printStackTrace();
-            borderInitialSize = 500.0;
+            // Default values
+            World defaultWorld = Bukkit.getWorld("warp_wheat");
+            waitingLobby = new Location(defaultWorld != null ? defaultWorld : Bukkit.getWorlds().get(0),
+                    365.565, 207, -40.461, 0, 0);
+            borderInitialSize = 600.0;
             borderFinalSize = 5.0;
             numberOfPhases = 6;
             borderShrinkFactor = 0.85;
             finalPhaseDuration = 120;
+            mongoConnectionString = "";
+            mongoDatabase = "BattleGroundTopKill";
+            mongoKillsCollection = "players_topkills";
+            mongoMatchHistoryCollection = "match_history";
         }
     }
 
     private Location parseConfigLocation(String path) {
-        String worldName = plugin.getConfig().getString(path + ".world", "warp_wheat");
+        String worldName = plugin.getConfig().getString(path + ".world");
+        if (worldName == null) {
+            plugin.getLogger().warning("Missing world for " + path + " in config");
+            return null;
+        }
         World world = Bukkit.getWorld(worldName);
         if (world == null) {
-            plugin.getLogger().warning("World '" + worldName + "' not found for " + path);
-            world = Bukkit.getWorlds().get(0);
-            plugin.getLogger().info("Available worlds: "
-                    + Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.joining(", ")));
+            plugin.getLogger().warning("Invalid world '" + worldName + "' for " + path + " in config");
+            return null;
         }
-        double x = plugin.getConfig().getDouble(path + ".x", 0);
-        double y = plugin.getConfig().getDouble(path + ".y", 100);
-        double z = plugin.getConfig().getDouble(path + ".z", 0);
+        double x = plugin.getConfig().getDouble(path + ".x", 0.0);
+        double y = plugin.getConfig().getDouble(path + ".y", 100.0);
+        double z = plugin.getConfig().getDouble(path + ".z", 0.0);
         float yaw = (float) plugin.getConfig().getDouble(path + ".yaw", 0.0);
         float pitch = (float) plugin.getConfig().getDouble(path + ".pitch", 0.0);
-        plugin.getLogger().info("Loaded " + path + " at " + world.getName() + ": x=" + x + ", y=" + y + ", z=" + z);
         return new Location(world, x, y, z, yaw, pitch);
     }
 
@@ -158,14 +233,48 @@ public class BattlegroundManager {
         if (!isRunning && !participants.contains(player)) {
             participants.add(player);
             String addCommand = "rg addmember -w warp_wheat __global__ " + player.getName();
+            plugin.getLogger().info("Attempting to execute WorldGuard command: " + addCommand);
             boolean success = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), addCommand);
-            plugin.getLogger().info("Executing command: " + addCommand + " (success: " + success + ")");
+            plugin.getLogger().info("WorldGuard command result: " + addCommand + " (success: " + success + ")");
+            if (!success) {
+                player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                        + ChatColor.RED + "Lỗi: Không thể thêm bạn vào vùng Battleground. Liên hệ admin.");
+                plugin.getLogger().severe("Failed to add " + player.getName() + " to region __global__ in warp_wheat");
+                // Remove player from participants to prevent inconsistent state
+                participants.remove(player);
+                return;
+            }
 
-            player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                    + ChatColor.GREEN + "Bạn đã tham gia Battleground!");
-            Bukkit.broadcastMessage(
-                    ChatColor.YELLOW + "Hiện có " + participants.size() + "/" + minPlayers + " người tham gia.");
-            plugin.getLogger().info("Player " + player.getName() + " registered. Participants: " + participants.size());
+            // Log waitingLobby details
+            plugin.getLogger().info("WaitingLobby: " + (waitingLobby != null ? waitingLobby.toString() : "null") +
+                    ", World: "
+                    + (waitingLobby != null && waitingLobby.getWorld() != null ? waitingLobby.getWorld().getName()
+                            : "null"));
+
+            // Delay teleport to ensure WorldGuard processes the command
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    plugin.getLogger().info("Teleporting " + player.getName() + " to " + waitingLobby);
+                    player.teleport(waitingLobby);
+                    plugin.getLogger().info("Teleport successful for " + player.getName());
+                    player.setGameMode(GameMode.SURVIVAL);
+                    player.setFoodLevel(20);
+                    for (PotionEffect effect : player.getActivePotionEffects()) {
+                        player.removePotionEffect(effect.getType());
+                    }
+
+                    player.sendMessage(
+                            ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
+                                    + ChatColor.GREEN + "Bạn đã tham gia Battleground và được đưa đến sảnh chờ!");
+                    Bukkit.broadcastMessage(
+                            ChatColor.YELLOW + "Hiện có " + participants.size()
+                                    + " người tham gia.");
+                    plugin.getLogger().info("Player " + player.getName()
+                            + " registered and teleported to waiting lobby at " + waitingLobby + ". Participants: "
+                            + participants.size());
+                }
+            }.runTaskLater(plugin, 20L); // Delay 1 second (20 ticks)
         } else {
             player.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                     + ChatColor.RED + "Bạn đã đăng ký hoặc trận đã bắt đầu!");
@@ -194,7 +303,7 @@ public class BattlegroundManager {
                                         + e.getMessage());
                     }
                 }
-            }.runTaskLater(plugin, 10L);
+            }.runTaskLater(plugin, 5L);
 
             new BukkitRunnable() {
                 @Override
@@ -208,7 +317,7 @@ public class BattlegroundManager {
                                         + e.getMessage());
                     }
                 }
-            }.runTaskLater(plugin, 20L);
+            }.runTaskLater(plugin, 10L);
         }
     }
 
@@ -276,7 +385,6 @@ public class BattlegroundManager {
 
         for (Player p : participants) {
             if (p.isOnline()) {
-                p.teleport(lobbyLocation);
                 p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                         + ChatColor.YELLOW + "Chờ đếm ngược để bắt đầu!");
             }
@@ -289,12 +397,12 @@ public class BattlegroundManager {
         }
 
         countdownTask = new BukkitRunnable() {
-            int countdown = 30;
+            int countdown = 10; // Fixed 2-minute countdown
 
             @Override
             public void run() {
                 if (countdown > 10) {
-                    if (countdown % 10 == 0) {
+                    if (countdown % 30 == 0 || countdown == 20 || countdown == 15) {
                         Bukkit.broadcastMessage(
                                 ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY
                                         + "] " + ChatColor.YELLOW + "Trận bắt đầu sau " + countdown + " giây!");
@@ -346,7 +454,7 @@ public class BattlegroundManager {
         for (Player p : Bukkit.getOnlinePlayers()) {
             p.sendTitle(
                     ChatColor.GOLD + "⚔ BATTLEGROUND ⚔",
-                    ChatColor.YELLOW + "Thời gian bất tử bắt đầu!",
+                    ChatColor.YELLOW + "Rơi nhẹ và thời gian bất tử bắt đầu!",
                     20, 100, 20);
 
             if (participants.contains(p)) {
@@ -364,17 +472,24 @@ public class BattlegroundManager {
 
         for (Player p : participants) {
             if (p.isOnline()) {
-                p.teleport(borderCenter.clone().add(0, 10, 0));
+                // Get current player location and reduce Y by 3
+                Location currentLocation = p.getLocation();
+                Location dropLocation = new Location(
+                        currentLocation.getWorld(),
+                        currentLocation.getX(),
+                        currentLocation.getY() - 3,
+                        currentLocation.getZ(),
+                        currentLocation.getYaw(),
+                        currentLocation.getPitch());
+                p.teleport(dropLocation);
                 p.setInvulnerable(true);
                 p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
-                        + ChatColor.GREEN + "Bạn đang trong thời gian bất tử!");
-                p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 16 * 20, 0));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 6 * 20, 4));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 8 * 20, 0));
-                p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
-                plugin.getLogger().info("Teleported " + p.getName() + " to invincibility phase location: " +
-                        borderCenter.getWorld().getName() + " x=" + borderCenter.getX() + ", y="
-                        + (borderCenter.getY() + 10) + ", z=" + borderCenter.getZ());
+                        + ChatColor.GREEN + "Bạn đang trong thời gian bất tử và rơi nhẹ!");
+                p.addPotionEffect(
+                        new PotionEffect(PotionEffectType.SLOW_FALLING, invincibilityDuration * 10, 0, false, false));
+                plugin.getLogger().info("Teleported " + p.getName() + " to drop location: " +
+                        dropLocation.getWorld().getName() + " x=" + dropLocation.getX() + ", y=" + dropLocation.getY()
+                        + ", z=" + dropLocation.getZ());
             }
         }
 
@@ -388,10 +503,7 @@ public class BattlegroundManager {
                     for (Player p : participants) {
                         if (p.isOnline()) {
                             p.setInvulnerable(false);
-                            p.removePotionEffect(PotionEffectType.SLOW_FALLING);
-                            p.removePotionEffect(PotionEffectType.SPEED);
-                            p.removePotionEffect(PotionEffectType.INVISIBILITY);
-                            p.removePotionEffect(PotionEffectType.REGENERATION);
+                            // SLOW_FALLING is kept until player lands naturally
                             p.sendMessage(
                                     ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                                             + ChatColor.RED + "Bất tử đã hết, trận đấu bắt đầu!");
@@ -503,6 +615,23 @@ public class BattlegroundManager {
         }.runTaskTimer(plugin, 0L, 20L);
     }
 
+    public void endMatch(Player winner) {
+        if (!isRunning) {
+            plugin.getLogger().warning("No match is running to end!");
+            return;
+        }
+        isRunning = false;
+        String winnerName = winner != null ? winner.getName() : "None";
+        String phaseReached = currentPhase <= 6 ? "Phase " + currentPhase : "Overtime";
+        saveMatchHistory(winnerName, new ArrayList<>(participants), phaseReached);
+        Bukkit.broadcastMessage(
+                ChatColor.GOLD + "Trận đấu đã kết thúc! Người thắng: " + (winner != null ? winnerName : "Không có"));
+        participants.clear();
+        totalKills.clear();
+        currentPhase = 0;
+        matchStartTime = 0;
+    }
+
     private void startBorderPhases(long timePerPhaseTicks) {
         double[] phaseSizes = new double[numberOfPhases + 1];
         phaseSizes[0] = borderInitialSize;
@@ -612,6 +741,10 @@ public class BattlegroundManager {
                     }.runTaskLater(plugin, shrinkTime * 20L);
 
                     if (phase == numberOfPhases) {
+                        // Calculate remaining match time for final phase
+                        long timeElapsed = (System.currentTimeMillis() / 1000) - matchStartTime;
+                        long remainingTime = Math.max(0, matchDuration - timeElapsed);
+                        finalPhaseCountdown = Math.min(finalPhaseDuration, remainingTime); // Cap at remaining time
                         new BukkitRunnable() {
                             @Override
                             public void run() {
@@ -625,19 +758,112 @@ public class BattlegroundManager {
         }.runTaskTimer(plugin, 0L, timePerPhaseTicks);
     }
 
+    public void stopMatch(CommandSender sender) {
+        if (!isRunning) {
+            sender.sendMessage(ChatColor.RED + "Không có trận đấu nào đang diễn ra!");
+            return;
+        }
+        isRunning = false;
+        saveMatchHistory("None", new ArrayList<>(participants),
+                currentPhase <= 6 ? "Phase " + currentPhase : "Overtime");
+        Bukkit.broadcastMessage(ChatColor.RED + "Trận đấu đã bị dừng bởi " + sender.getName() + "!");
+        participants.clear();
+        totalKills.clear();
+        currentPhase = 0;
+        matchStartTime = 0;
+    }
+
+    public void saveMatchHistory(String winner, List<Player> participants, String phaseReached) {
+        if (matchHistoryCollection == null) {
+            plugin.getLogger().warning("Cannot save match history: MongoDB not initialized.");
+            return;
+        }
+        try {
+            long matchEndTime = System.currentTimeMillis();
+            long duration = matchStartTime > 0 ? (matchEndTime - matchStartTime) / 1000 : 0;
+            if (matchStartTime <= 0) {
+                plugin.getLogger().warning("matchStartTime is invalid (" + matchStartTime + "), setting duration to 0");
+            }
+
+            Document matchDoc = new Document("_id", UUID.randomUUID().toString())
+                    .append("timestamp", new Date())
+                    .append("winner", winner)
+                    .append("participants", participants.stream().map(Player::getName).collect(Collectors.toList()))
+                    .append("kills", participants.stream().collect(Collectors.toMap(
+                            Player::getName,
+                            p -> totalKills.getOrDefault(p, 0),
+                            (v1, v2) -> v1,
+                            LinkedHashMap::new)))
+                    .append("duration", duration)
+                    .append("phase_reached", phaseReached);
+
+            plugin.getLogger()
+                    .info("Attempting to save match history: winner=" + winner + ", participants=" + participants.size()
+                            +
+                            ", duration=" + duration + "s, phase=" + phaseReached);
+            matchHistoryCollection.insertOne(matchDoc);
+            plugin.getLogger().info("Successfully saved match history to MongoDB: winner=" + winner + ", participants="
+                    + participants.size());
+        } catch (com.mongodb.MongoWriteException e) {
+            plugin.getLogger().severe("MongoDB write error while saving match history: " + e.getMessage() +
+                    ", Code: " + e.getCode() + ", Details: " + e.getError().toString());
+            e.printStackTrace();
+        } catch (Exception e) {
+            plugin.getLogger().severe("Unexpected error saving match history to MongoDB: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public String getRecentMatch() {
+        if (matchHistoryCollection == null) {
+            return ChatColor.RED + "Chưa có dữ liệu lịch sử trận đấu do MongoDB không được khởi tạo!";
+        }
+        try {
+            Document match = matchHistoryCollection.find()
+                    .sort(new Document("timestamp", -1))
+                    .limit(1)
+                    .first();
+            if (match == null) {
+                return ChatColor.RED + "Chưa có trận đấu nào được ghi lại!";
+            }
+
+            StringBuilder result = new StringBuilder();
+            result.append(ChatColor.GOLD + "✦ LỊCH SỬ TRẬN ĐẤU GẦN NHẤT ✦\n");
+            result.append(ChatColor.YELLOW + "Thời gian: " + ChatColor.WHITE
+                    + new SimpleDateFormat("dd/MM/yyyy HH:mm:ss").format(match.getDate("timestamp")) + "\n");
+            result.append(ChatColor.YELLOW + "Người thắng: " + ChatColor.GREEN + match.getString("winner") + "\n");
+            result.append(ChatColor.YELLOW + "Người tham gia: " + ChatColor.WHITE
+                    + String.join(", ", match.getList("participants", String.class)) + "\n");
+            result.append(ChatColor.YELLOW + "Số kills:\n");
+            Document kills = match.get("kills", Document.class);
+            for (String player : kills.keySet()) {
+                result.append(ChatColor.WHITE + "  - " + player + ": " + ChatColor.GREEN + kills.getInteger(player)
+                        + " kills\n");
+            }
+            result.append(ChatColor.YELLOW + "Thời lượng: " + ChatColor.WHITE + match.getLong("duration") + " giây\n");
+            result.append(ChatColor.YELLOW + "Giai đoạn: " + ChatColor.WHITE + match.getString("phase_reached") + "\n");
+
+            return result.toString();
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to fetch recent match from MongoDB: " + e.getMessage());
+            e.printStackTrace();
+            return ChatColor.RED + "Lỗi khi lấy lịch sử trận đấu từ MongoDB!";
+        }
+    }
+
     private void startFinalPhase() {
         Bukkit.broadcastMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                 + ChatColor.RED + "CẢNH BÁO: Vòng bo cuối cùng!\n" +
                 ChatColor.YELLOW + "Kích thước: " + String.format("%.1f", borderFinalSize) + " blocks\n" +
-                ChatColor.YELLOW + "Tử chiến bắt đầu sau: " + formatTime(finalPhaseDuration));
+                ChatColor.YELLOW + "Tử chiến bắt đầu sau: " + formatTime(finalPhaseCountdown));
 
         for (Player p : participants) {
             if (p.isOnline()) {
                 p.sendTitle(
                         ChatColor.RED + "⚠ Vòng bo cuối cùng ⚠",
-                        ChatColor.YELLOW + "Chuẩn bị tử chiến!",
+                        ChatColor.YELLOW + "Tử chiến sau " + formatTime(finalPhaseCountdown),
                         10, 60, 20);
-                p.sendMessage(ChatColor.YELLOW + "Tử chiến sau " + formatTime(finalPhaseDuration));
+                p.sendMessage(ChatColor.YELLOW + "Tử chiến sau " + formatTime(finalPhaseCountdown));
             }
         }
 
@@ -645,7 +871,7 @@ public class BattlegroundManager {
         updateBorderBar();
 
         new BukkitRunnable() {
-            int countdown = finalPhaseDuration;
+            long countdown = finalPhaseCountdown;
 
             @Override
             public void run() {
@@ -654,13 +880,12 @@ public class BattlegroundManager {
                     return;
                 }
 
-                countdown--;
-
-                if (countdown == 30 || countdown == 20 || countdown == 10 || (countdown > 0 && countdown <= 5)) {
+                finalPhaseCountdown = countdown; // Update global countdown
+                if (countdown == 60 || countdown == 30 || countdown == 20 || countdown == 10
+                        || (countdown > 0 && countdown <= 5)) {
                     Bukkit.broadcastMessage(
                             ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                                     + ChatColor.RED + "Tử chiến bắt đầu sau: " + formatTime(countdown));
-
                     for (Player p : participants) {
                         if (p.isOnline()) {
                             p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_BELL, 1.0f, 1.0f);
@@ -668,15 +893,39 @@ public class BattlegroundManager {
                     }
                 }
 
+                updateBorderBar();
+                updateScoreboard();
+
                 if (countdown <= 0) {
                     startOvertimePhase();
+                    finalPhaseCountdown = -1; // Reset countdown
                     cancel();
                 }
+                countdown--;
             }
         }.runTaskTimer(plugin, 20L, 20L);
     }
 
     private void startOvertimePhase() {
+        // Remove existing BossBar
+        if (borderBar != null) {
+            borderBar.removeAll();
+            borderBar = null;
+        }
+
+        // Create new BossBar for overtime
+        borderBar = Bukkit.createBossBar(
+                ChatColor.RED + "" + ChatColor.BOLD + "Tử Chiến",
+                BarColor.RED,
+                BarStyle.SOLID);
+        borderBar.setProgress(1.0); // Full bar, static
+        for (Player p : participants) {
+            if (p.isOnline()) {
+                borderBar.addPlayer(p);
+            }
+        }
+
+        // Reset border
         border.reset();
         border = null;
 
@@ -741,13 +990,22 @@ public class BattlegroundManager {
     }
 
     private void updateBorderBar() {
-        if (borderBar != null && border != null) {
-            long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
-            borderBar.setTitle(ChatColor.GOLD + "Vòng Bo: " + String.format("%.1f", border.getSize()) + " blocks" +
-                    ChatColor.YELLOW + " | Phase: " + currentPhase + "/" + numberOfPhases +
-                    ChatColor.GREEN + " | Time: " + formatTime(timeLeft));
-            double progress = border.getSize() / borderInitialSize;
-            borderBar.setProgress(Math.max(0, Math.min(1, progress)));
+        if (borderBar != null && border != null) { // Only update if not in overtime
+            if (currentPhase < numberOfPhases) {
+                long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
+                borderBar.setTitle(ChatColor.GOLD + "Vòng Bo: " + String.format("%.1f", border.getSize()) + " blocks" +
+                        ChatColor.YELLOW + " | Phase: " + currentPhase + "/" + numberOfPhases +
+                        ChatColor.GREEN + " | Time: " + formatTime(Math.max(0, timeLeft)));
+                double progress = border.getSize() / borderInitialSize;
+                borderBar.setProgress(Math.max(0, Math.min(1, progress)));
+            } else if (finalPhaseCountdown >= 0) {
+                // Phase 6: Show countdown to overtime
+                borderBar.setTitle(ChatColor.GOLD + "Vòng Bo: " + String.format("%.1f", border.getSize()) + " blocks" +
+                        ChatColor.YELLOW + " | Phase: " + currentPhase + "/" + numberOfPhases +
+                        ChatColor.RED + " | Tử Chiến Sau: " + formatTime(finalPhaseCountdown));
+                double progress = border.getSize() / borderInitialSize;
+                borderBar.setProgress(Math.max(0, Math.min(1, progress)));
+            }
         }
     }
 
@@ -788,10 +1046,8 @@ public class BattlegroundManager {
             plugin.getLogger().warning("Stop called while match is not running!");
             return;
         }
-        Bukkit.broadcastMessage("");
-        Bukkit.broadcastMessage(ChatColor.WHITE + "✦ KẾT QUẢ TRẬN ĐẤU BattleGround  ✦");
-        Bukkit.broadcastMessage("");
 
+        // Determine winner
         Player winner = null;
         for (Player p : participants) {
             if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
@@ -799,6 +1055,16 @@ public class BattlegroundManager {
                 break;
             }
         }
+
+        // Save match history via endMatch
+        String phaseReached = currentPhase <= 6 ? "Phase " + currentPhase : "Overtime";
+        endMatch(winner);
+        plugin.getLogger().info("Match stopped with winner: " + (winner != null ? winner.getName() : "None"));
+
+        // Broadcast match results
+        Bukkit.broadcastMessage("");
+        Bukkit.broadcastMessage(ChatColor.WHITE + "✦ KẾT QUẢ TRẬN ĐẤU BattleGround  ✦");
+        Bukkit.broadcastMessage("");
 
         if (winner != null) {
             Bukkit.broadcastMessage(ChatColor.GOLD + "⚔ NGƯỜI SỐNG SÓT CUỐI CÙNG ⚔");
@@ -816,6 +1082,7 @@ public class BattlegroundManager {
                 p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
             }
         }
+
         if (!kills.isEmpty()) {
             Bukkit.broadcastMessage(ChatColor.RED + "☠ TOP KILL ☠");
             Map<Player, Integer> matchKills = new HashMap<>(kills);
@@ -830,7 +1097,6 @@ public class BattlegroundManager {
                         ChatColor.WHITE + "( " +
                         ChatColor.GREEN + entry.getValue() + " kill"
                         + ChatColor.WHITE + ")");
-
                 if (rank >= 3)
                     break;
                 rank++;
@@ -840,22 +1106,26 @@ public class BattlegroundManager {
 
         Bukkit.broadcastMessage("");
 
+        // Reset border
         if (border != null) {
             border.reset();
             border = null;
         }
 
+        // Remove boss bar
         if (borderBar != null) {
             borderBar.removeAll();
             borderBar = null;
         }
 
+        // Cancel all tasks
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
             }
         }
 
+        // Reset players
         List<Player> playersToRemove = new ArrayList<>(participants);
         for (Player p : playersToRemove) {
             if (p.isOnline()) {
@@ -866,10 +1136,13 @@ public class BattlegroundManager {
                         + ChatColor.GREEN + "Trận đấu đã kết thúc! Bạn đã được đưa về trạng thái bình thường.");
             }
         }
+
+        // Clear scoreboard
         if (gameScoreboard.getObjective("bginfo") != null) {
             gameScoreboard.getObjective("bginfo").unregister();
         }
 
+        // Restore original scoreboards
         for (Map.Entry<Player, Scoreboard> entry : new HashMap<>(originalScoreboards).entrySet()) {
             Player player = entry.getKey();
             if (player.isOnline()) {
@@ -897,57 +1170,55 @@ public class BattlegroundManager {
     }
 
     public void saveKillData() {
+        if (playerKillsCollection == null) {
+            plugin.getLogger().warning("Cannot save kill data: MongoDB not initialized.");
+            return;
+        }
         try {
-            YamlConfiguration config = new YamlConfiguration();
-
             for (Map.Entry<Player, Integer> entry : totalKills.entrySet()) {
-                String uuid = entry.getKey().getUniqueId().toString();
-                String playerName = entry.getKey().getName();
-                config.set("kills." + uuid + ".name", playerName);
-                config.set("kills." + uuid + ".total", entry.getValue());
-            }
+                Player player = entry.getKey();
+                String uuid = player.getUniqueId().toString();
+                String playerName = player.getName();
+                int kills = entry.getValue();
 
-            killDataFile.getParentFile().mkdirs();
-            config.save(killDataFile);
-            plugin.getLogger().info("Successfully saved kill data to " + killDataFile.getName());
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to save kill data: " + e.getMessage());
+                Document query = new Document("_id", uuid);
+                Document update = new Document("$set", new Document("name", playerName)
+                        .append("total_kills", kills));
+                playerKillsCollection.updateOne(query, update,
+                        new com.mongodb.client.model.UpdateOptions().upsert(true));
+            }
+            plugin.getLogger().info("Successfully saved kill data to MongoDB");
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to save kill data to MongoDB: " + e.getMessage());
             e.printStackTrace();
         }
     }
 
     private void loadKillData() {
-        if (!killDataFile.exists()) {
-            plugin.getLogger().info("No kill data file found. Starting with empty kill statistics.");
+        if (playerKillsCollection == null) {
+            plugin.getLogger().warning("Cannot load kill data: MongoDB not initialized.");
             return;
         }
-
         try {
-            YamlConfiguration config = YamlConfiguration.loadConfiguration(killDataFile);
-            ConfigurationSection killsSection = config.getConfigurationSection("kills");
-
-            if (killsSection == null) {
-                plugin.getLogger().info("No kill data found in file. Starting with empty kill statistics.");
-                return;
-            }
-
             totalKills.clear();
-            for (String uuid : killsSection.getKeys(false)) {
+            for (Document doc : playerKillsCollection.find()) {
+                String uuid = doc.getString("_id");
+                String playerName = doc.getString("name");
+                int total = doc.getInteger("total_kills", 0);
                 try {
                     UUID playerUUID = UUID.fromString(uuid);
                     Player player = Bukkit.getPlayer(playerUUID);
                     if (player != null && player.isOnline()) {
-                        int total = killsSection.getInt(uuid + ".total");
                         totalKills.put(player, total);
-                        plugin.getLogger().info("Loaded " + total + " kills for player " + player.getName());
+                        plugin.getLogger().info("Loaded " + total + " kills for player " + playerName);
                     }
                 } catch (IllegalArgumentException e) {
-                    plugin.getLogger().warning("Invalid UUID in kill data file: " + uuid);
+                    plugin.getLogger().warning("Invalid UUID in MongoDB data: " + uuid);
                 }
             }
-            plugin.getLogger().info("Successfully loaded kill data for " + totalKills.size() + " players");
+            plugin.getLogger().info("Successfully loaded kill data for " + totalKills.size() + " players from MongoDB");
         } catch (Exception e) {
-            plugin.getLogger().severe("Error loading kill data: " + e.getMessage());
+            plugin.getLogger().severe("Error loading kill data from MongoDB: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -1140,7 +1411,7 @@ public class BattlegroundManager {
 
         int score = 15;
         long timeLeft = matchStartTime + matchDuration - (System.currentTimeMillis() / 1000);
-        if (timeLeft > 0) {
+        if (timeLeft > 0 && currentPhase < numberOfPhases) {
             objective.getScore(ChatColor.WHITE + "⌚ Thời gian còn lại: " + ChatColor.YELLOW + formatTime(timeLeft))
                     .setScore(score--);
             objective.getScore("").setScore(score--);
@@ -1177,8 +1448,9 @@ public class BattlegroundManager {
                                 .setScore(score--);
                     }
                 }
-            } else {
-                objective.getScore(ChatColor.RED + " ▸ Tử Chiến Sắp Diễn Ra!").setScore(score--);
+            } else if (finalPhaseCountdown >= 0) {
+                objective.getScore(ChatColor.RED + " ▸ Tử Chiến Sau: " + formatTime(finalPhaseCountdown))
+                        .setScore(score--);
             }
             objective.getScore("   ").setScore(score--);
         } else {
@@ -1285,40 +1557,58 @@ public class BattlegroundManager {
     }
 
     public void addKill(Player killer) {
-        if (!isRunning)
+        if (playerKillsCollection == null) {
+            plugin.getLogger().warning("Cannot update kills: MongoDB not initialized.");
             return;
+        }
+        try {
+            String uuid = killer.getUniqueId().toString();
+            String playerName = killer.getName();
+            int kills = totalKills.getOrDefault(killer, 0) + 1;
+            totalKills.put(killer, kills);
 
-        kills.merge(killer, 1, Integer::sum);
-        totalKills.merge(killer, 1, Integer::sum);
-
-        updateScoreboard();
-
-        killer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 6 * 20, 4));
+            Document query = new Document("_id", uuid);
+            Document update = new Document("$set", new Document("name", playerName)
+                    .append("total_kills", kills));
+            playerKillsCollection.updateOne(query, update, new UpdateOptions().upsert(true));
+            plugin.getLogger().info("Updated kills for " + playerName + " in MongoDB: " + kills);
+        } catch (Exception e) {
+            plugin.getLogger()
+                    .severe("Failed to update kills for " + killer.getName() + " in MongoDB: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     public String getTopTotalKills() {
-        if (totalKills.isEmpty()) {
-            return ChatColor.RED + "Chưa có thống kê kills nào!";
+        if (playerKillsCollection == null) {
+            return ChatColor.RED + "Chưa có thống kê kills nào do MongoDB không được khởi tạo!";
         }
-
-        StringBuilder status = new StringBuilder();
-        status.append(ChatColor.GOLD + "✦ TOP KILLS BattleGround ✦\n");
-
-        List<Map.Entry<Player, Integer>> topKillers = new ArrayList<>(totalKills.entrySet());
-        topKillers.sort((a, b) -> b.getValue().compareTo(a.getValue()));
-
-        int rank = 1;
-        for (Map.Entry<Player, Integer> entry : topKillers) {
-            String prefix = rank == 1 ? "#1." : rank == 2 ? "#2." : "#3.";
-            status.append(ChatColor.YELLOW + prefix + " " +
-                    ChatColor.WHITE + entry.getKey().getName() + ": " +
-                    ChatColor.GREEN + entry.getValue() + " kills\n");
-            if (rank >= 10)
-                break;
-            rank++;
+        try {
+            List<Document> topKillers = playerKillsCollection.find()
+                    .sort(new Document("total_kills", -1))
+                    .limit(10)
+                    .into(new ArrayList<>());
+            if (topKillers.isEmpty()) {
+                return ChatColor.RED + "Chưa có thống kê kills nào!";
+            }
+            StringBuilder status = new StringBuilder();
+            status.append(ChatColor.GOLD + "✦ TOP KILLS BattleGround ✦\n");
+            int rank = 1;
+            for (Document doc : topKillers) {
+                String name = doc.getString("name");
+                int kills = doc.getInteger("total_kills", 0);
+                String prefix = rank == 1 ? "#1." : rank == 2 ? "#2." : rank == 3 ? "#3." : "#" + rank + ".";
+                status.append(ChatColor.YELLOW + prefix + " " +
+                        ChatColor.WHITE + name + ": " +
+                        ChatColor.GREEN + kills + " kills\n");
+                rank++;
+            }
+            return status.toString();
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to fetch top kills from MongoDB: " + e.getMessage());
+            e.printStackTrace();
+            return ChatColor.RED + "Lỗi khi lấy top kills từ MongoDB!";
         }
-
-        return status.toString();
     }
 
     private void startAutoSave() {
@@ -1326,9 +1616,9 @@ public class BattlegroundManager {
             @Override
             public void run() {
                 saveKillData();
-                plugin.getLogger().info("Auto-saved kill data");
+                plugin.getLogger().info("Auto-saved kill data to MongoDB");
             }
-        }.runTaskTimer(plugin, 6000L, 6000L);
+        }.runTaskTimer(plugin, 6000L, 6000L); // Lưu mỗi 5 phút
     }
 
     public void cleanup() {
@@ -1336,6 +1626,36 @@ public class BattlegroundManager {
             autoSaveTask.cancel();
         }
         saveKillData();
+        if (mongoClient != null) {
+            mongoClient.close();
+            plugin.getLogger().info("Closed MongoDB connection");
+        }
         vanishedArmor.clear();
+    }
+
+    private void initializeMongoDB() {
+        if (mongoConnectionString.isEmpty()) {
+            plugin.getLogger().warning("MongoDB not initialized due to missing connection string.");
+            return;
+        }
+        try {
+            MongoClientSettings settings = MongoClientSettings.builder()
+                    .applyConnectionString(new ConnectionString(mongoConnectionString))
+                    .applyToClusterSettings(builder -> builder.serverSelectionTimeout(5, TimeUnit.SECONDS))
+                    .build();
+            mongoClient = MongoClients.create(settings);
+            MongoDatabase database = mongoClient.getDatabase(mongoDatabase);
+            playerKillsCollection = database.getCollection(mongoKillsCollection);
+            matchHistoryCollection = database.getCollection(mongoMatchHistoryCollection);
+            plugin.getLogger()
+                    .info("Successfully connected to MongoDB Atlas: database=" + mongoDatabase + ", kills-collection="
+                            + mongoKillsCollection + ", match-history-collection=" + mongoMatchHistoryCollection);
+        } catch (Exception e) {
+            plugin.getLogger().severe("Failed to connect to MongoDB: " + e.getMessage());
+            e.printStackTrace();
+            playerKillsCollection = null;
+            matchHistoryCollection = null;
+            mongoClient = null;
+        }
     }
 }

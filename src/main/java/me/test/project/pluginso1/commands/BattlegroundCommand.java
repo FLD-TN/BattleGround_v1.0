@@ -37,6 +37,8 @@ public class BattlegroundCommand implements CommandExecutor {
                         + " - Xem danh sách người chơi tham gia");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg topkill" + ChatColor.GRAY
                         + " - Xem bảng xếp hạng số kill tổng");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg lichsu" + ChatColor.GRAY
+                        + " - Xem lịch sử trận đấu gần nhất");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg settime <seconds>" + ChatColor.GRAY
                         + " - Đặt thời gian bắt đầu");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg border" + ChatColor.GRAY
@@ -64,6 +66,8 @@ public class BattlegroundCommand implements CommandExecutor {
                         + " - Xem danh sách người chơi tham gia");
                 sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg topkill" + ChatColor.GRAY
                         + " - Xem bảng xếp hạng số kill tổng");
+                sender.sendMessage(ChatColor.WHITE + "• " + ChatColor.YELLOW + "/bg lichsu" + ChatColor.GRAY
+                        + " - Xem lịch sử trận đấu gần nhất");
             }
             return true;
         }
@@ -266,6 +270,10 @@ public class BattlegroundCommand implements CommandExecutor {
         } else if (args[0].equalsIgnoreCase("topkill")) {
             String topKills = bgManager.getTopTotalKills();
             sender.sendMessage(topKills);
+            return true;
+        } else if (args[0].equalsIgnoreCase("lichsu")) {
+            String recentMatch = bgManager.getRecentMatch();
+            sender.sendMessage(recentMatch);
             return true;
         }
         return true;

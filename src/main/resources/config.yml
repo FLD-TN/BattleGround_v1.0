@@ -39,3 +39,8 @@ border-shrink-factor: 0.75
 
 # Khoảng cách dịch chuyển ngẫu nhiên của tâm vòng bo (blocks, 0.0 để tắt)
 border-random-offset: 50.0
+
+mongodb:
+  connection-string: "mongodb+srv://tduy6167:<m2kPGTw9HkgMEwjd>@battleground.apriylv.mongodb.net/?retryWrites=true&w=majority&appName=BattleGround"
+  database: "BattleGround"
+  collection: "players_topkills"
