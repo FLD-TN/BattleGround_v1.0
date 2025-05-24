@@ -66,6 +66,9 @@ public class DeathListener implements Listener {
             Bukkit.broadcastMessage("");
             Bukkit.broadcastMessage("");
 
+            // Ghi lại thứ tự tử trận
+            bgManager.recordDeath(player);
+
             // Xử lý người chơi chết
             player.setGameMode(GameMode.SPECTATOR);
             bgManager.getPlugin().getLogger().info("Set " + player.getName() + " to SPECTATOR mode on death");
@@ -186,5 +189,4 @@ public class DeathListener implements Listener {
             }.runTaskLater(bgManager.getPlugin(), 1L);
         }
     }
-
 }

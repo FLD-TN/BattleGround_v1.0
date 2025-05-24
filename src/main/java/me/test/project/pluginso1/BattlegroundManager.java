@@ -75,6 +75,7 @@ public class BattlegroundManager {
     private MongoCollection<Document> playerKillsCollection;
     private String mongoMatchHistoryCollection;
     private String mongoKillsCollection;
+    private final List<Player> deathOrder = new ArrayList<>();
 
     public BattlegroundManager(Main plugin) {
         this.plugin = plugin;
@@ -855,7 +856,6 @@ public class BattlegroundManager {
             return;
         }
         try {
-            // Calculate top 3 kills
             List<Map.Entry<Player, Integer>> matchKillers = new ArrayList<>(kills.entrySet());
             matchKillers.sort((a, b) -> b.getValue().compareTo(a.getValue()));
             List<Document> topKills = new ArrayList<>();
@@ -867,7 +867,6 @@ public class BattlegroundManager {
                         .append("kills", entry.getValue()));
                 rank++;
             }
-            // Add players with 0 kills if fewer than 3 players had kills
             for (Player p : participants) {
                 if (rank >= 3)
                     break;
@@ -877,16 +876,42 @@ public class BattlegroundManager {
                 }
             }
 
+            // Tính toán Top 5 sống sót
+            List<String> topSurvivors = new ArrayList<>();
+            Player winnerPlayer = participants.stream()
+                    .filter(p -> p.getName().equals(winner))
+                    .findFirst()
+                    .orElse(null);
+            if (winnerPlayer != null) {
+                topSurvivors.add(winnerPlayer.getName());
+            }
+            List<Player> reversedDeathOrder = new ArrayList<>(deathOrder);
+            Collections.reverse(reversedDeathOrder);
+            for (Player p : reversedDeathOrder) {
+                if (topSurvivors.size() >= 5)
+                    break;
+                if (!topSurvivors.contains(p.getName())) {
+                    topSurvivors.add(p.getName());
+                }
+            }
+            for (Player p : participants) {
+                if (topSurvivors.size() >= 5)
+                    break;
+                if (!topSurvivors.contains(p.getName()) && !deathOrder.contains(p)) {
+                    topSurvivors.add(p.getName());
+                }
+            }
+
             Document matchDoc = new Document("_id", UUID.randomUUID().toString())
                     .append("timestamp", new Date())
                     .append("winner", winner)
                     .append("participants", participants.stream().map(Player::getName).collect(Collectors.toList()))
-                    .append("top_kills", topKills);
+                    .append("top_kills", topKills)
+                    .append("top_survivors", topSurvivors);
 
             plugin.getLogger()
                     .info("Attempting to save match history: winner=" + winner + ", participants=" + participants.size()
-                            +
-                            ", top_kills=" + topKills.size());
+                            + ", top_kills=" + topKills.size() + ", top_survivors=" + topSurvivors.size());
             matchHistoryCollection.insertOne(matchDoc);
             plugin.getLogger().info("Successfully saved match history to MongoDB: winner=" + winner + ", participants="
                     + participants.size());
@@ -930,6 +955,23 @@ public class BattlegroundManager {
                     String prefix = rank == 1 ? "Top 1:" : rank == 2 ? "Top 2:" : "Top 3:";
                     result.append(ChatColor.WHITE + "  - " + prefix + " " + kill.getString("name") + " ("
                             + ChatColor.GREEN + kill.getInteger("kills") + " kills)\n");
+                    rank++;
+                }
+            }
+
+            result.append(ChatColor.YELLOW + "Top Sống Sót:\n");
+            List<String> topSurvivors = match.getList("top_survivors", String.class);
+            if (topSurvivors == null || topSurvivors.isEmpty()) {
+                result.append(ChatColor.WHITE + "  - Không có dữ liệu sống sót được ghi lại\n");
+            } else {
+                int rank = 1;
+                for (String survivor : topSurvivors) {
+                    String prefix = rank == 1 ? "Top 1:"
+                            : rank == 2 ? "Top 2:"
+                                    : rank == 3 ? "Top 3:"
+                                            : "Top " + rank + ":";
+                    String status = (rank == 1 && survivor.equals(match.getString("winner"))) ? " (Winner)" : "";
+                    result.append(ChatColor.WHITE + "  - " + prefix + " " + survivor + ChatColor.GREEN + status + "\n");
                     rank++;
                 }
             }
@@ -1047,13 +1089,13 @@ public class BattlegroundManager {
                 double damage = 1.0;
 
                 if (damagePhase > 10) {
-                    damage = 3.0;
+                    damage = 130.0;
                 }
                 if (damagePhase > 20) {
-                    damage = 5.0;
+                    damage = 140.0;
                 }
                 if (damagePhase > 30) {
-                    damage = 9.0;
+                    damage = 140.0;
                 }
 
                 for (Player p : participants) {
@@ -1140,11 +1182,9 @@ public class BattlegroundManager {
         plugin.getLogger().info("Participants before stop: "
                 + participants.stream().map(Player::getName).collect(Collectors.joining(", ")));
 
-        // Create playersToRemove before clearing participants
         List<Player> playersToRemove = new ArrayList<>(participants);
         plugin.getLogger().info("Created playersToRemove list with " + playersToRemove.size() + " players");
 
-        // Determine winner
         Player winner = null;
         for (Player p : participants) {
             if (p.isOnline() && p.getGameMode() != GameMode.SPECTATOR) {
@@ -1153,12 +1193,34 @@ public class BattlegroundManager {
             }
         }
 
-        // Save match history via endMatch
+        // Tính toán Top 5 sống sót
+        List<Player> topSurvivors = new ArrayList<>();
+        if (winner != null) {
+            topSurvivors.add(winner); // Top 1 là người chiến thắng
+        }
+        // Lấy tối đa 4 người chết cuối cùng từ deathOrder (ngược lại)
+        List<Player> reversedDeathOrder = new ArrayList<>(deathOrder);
+        Collections.reverse(reversedDeathOrder);
+        for (Player p : reversedDeathOrder) {
+            if (topSurvivors.size() >= 5)
+                break;
+            if (!topSurvivors.contains(p)) {
+                topSurvivors.add(p);
+            }
+        }
+        // Nếu không đủ 5 người, thêm các người chơi còn lại
+        for (Player p : participants) {
+            if (topSurvivors.size() >= 5)
+                break;
+            if (!topSurvivors.contains(p) && !deathOrder.contains(p)) {
+                topSurvivors.add(p);
+            }
+        }
+
         String phaseReached = currentPhase <= 6 ? "Phase " + currentPhase : "Overtime";
         endMatch(winner);
         plugin.getLogger().info("Match stopped with winner: " + (winner != null ? winner.getName() : "None"));
 
-        // Broadcast match results
         Bukkit.broadcastMessage("");
         Bukkit.broadcastMessage(ChatColor.WHITE + "✦ KẾT QUẢ TRẬN ĐẤU BattleGround  ✦");
         Bukkit.broadcastMessage("");
@@ -1180,7 +1242,6 @@ public class BattlegroundManager {
             }
         }
 
-        // Display top kills
         if (!kills.isEmpty()) {
             Bukkit.broadcastMessage(ChatColor.RED + "☠ TOP KILL ☠");
             Map<Player, Integer> matchKills = new HashMap<>(kills);
@@ -1204,31 +1265,46 @@ public class BattlegroundManager {
             Bukkit.broadcastMessage(ChatColor.YELLOW + "No kills recorded for this match!");
         }
 
-        kills.clear(); // Clear after displaying
+        // Hiển thị Top 5 sống sót
+        if (!topSurvivors.isEmpty()) {
+            Bukkit.broadcastMessage("");
+            Bukkit.broadcastMessage(ChatColor.GREEN + "☠ TOP SỐNG SÓT ☠");
+            int rank = 1;
+            for (Player p : topSurvivors) {
+                String prefix = rank == 1 ? "Top 1:"
+                        : rank == 2 ? "Top 2:" : rank == 3 ? "Top 3:" : "Top " + rank + ":";
+                String status = (rank == 1 && winner != null) ? " (Winner)" : "";
+                Bukkit.broadcastMessage(ChatColor.YELLOW + prefix + " " +
+                        ChatColor.WHITE + p.getName() + ChatColor.GREEN + status);
+                rank++;
+            }
+        } else {
+            plugin.getLogger().warning("No survivor data recorded for this match!");
+            Bukkit.broadcastMessage(ChatColor.YELLOW + "No survivor data recorded for this match!");
+        }
+
+        kills.clear();
+        deathOrder.clear(); // Xóa thứ tự tử trận
 
         Bukkit.broadcastMessage("");
 
-        // Reset border
         if (border != null) {
             border.reset();
             border = null;
         }
 
-        // Remove boss bar
         if (borderBar != null) {
             borderBar.removeAll();
             borderBar = null;
         }
 
-        // Reset players
         plugin.getLogger().info("Starting player reset for " + playersToRemove.size() + " players");
         for (Player p : playersToRemove) {
             try {
-                // Refresh player object to avoid stale references
                 Player refreshedPlayer = Bukkit.getPlayer(p.getUniqueId());
                 if (refreshedPlayer != null && refreshedPlayer.isOnline()) {
                     plugin.getLogger().info("Processing player: " + refreshedPlayer.getName() + ", online: true");
-                    unregisterPlayer(refreshedPlayer); // Handles SURVIVAL, teleport, scoreboard
+                    unregisterPlayer(refreshedPlayer);
                 } else {
                     participants.remove(p);
                     originalScoreboards.remove(p);
@@ -1242,12 +1318,10 @@ public class BattlegroundManager {
         }
         plugin.getLogger().info("Completed player reset");
 
-        // Clear scoreboard
         if (gameScoreboard != null && gameScoreboard.getObjective("bginfo") != null) {
             gameScoreboard.getObjective("bginfo").unregister();
         }
 
-        // Clear remaining state
         originalScoreboards.clear();
         vanishedArmor.clear();
         participants.clear();
@@ -1263,7 +1337,6 @@ public class BattlegroundManager {
             countdownTask = null;
         }
 
-        // Cancel all tasks after player processing
         for (BukkitTask task : Bukkit.getScheduler().getPendingTasks()) {
             if (task.getOwner().equals(plugin)) {
                 task.cancel();
@@ -1746,7 +1819,7 @@ public class BattlegroundManager {
             mongoClient.close();
             plugin.getLogger().info("Closed MongoDB connection");
         }
-        vanishedArmor.clear();
+        deathOrder.clear();
     }
 
     private void initializeMongoDB() {
@@ -1772,6 +1845,13 @@ public class BattlegroundManager {
             playerKillsCollection = null;
             matchHistoryCollection = null;
             mongoClient = null;
+        }
+    }
+
+    public void recordDeath(Player player) {
+        if (!deathOrder.contains(player)) {
+            deathOrder.add(player);
+            plugin.getLogger().info("Recorded death of " + player.getName() + " in death order");
         }
     }
 }
