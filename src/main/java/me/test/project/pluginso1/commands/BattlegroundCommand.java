@@ -1,6 +1,8 @@
 package me.test.project.pluginso1.commands;
 
 import me.test.project.pluginso1.BattlegroundManager;
+
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -274,6 +276,19 @@ public class BattlegroundCommand implements CommandExecutor {
         } else if (args[0].equalsIgnoreCase("lichsu")) {
             String recentMatch = bgManager.getRecentMatch();
             sender.sendMessage(recentMatch);
+            return true;
+        } else if (args[0].equalsIgnoreCase("tatbattu") && args.length == 2) {
+            if (!sender.hasPermission("battleground.admin")) {
+                sender.sendMessage(ChatColor.RED + "Bạn không có quyền sử dụng lệnh này!");
+                return true;
+            }
+            Player target = Bukkit.getPlayerExact(args[1]);
+            if (target == null || !target.isOnline()) {
+                sender.sendMessage(ChatColor.RED + "Người chơi " + args[1] + " không online!");
+                return true;
+            }
+            target.setInvulnerable(false);
+            sender.sendMessage(ChatColor.GREEN + "Đã tắt trạng thái bất tử cho " + target.getName());
             return true;
         }
         return true;

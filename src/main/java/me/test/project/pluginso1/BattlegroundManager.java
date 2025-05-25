@@ -256,7 +256,6 @@ public class BattlegroundManager {
             new BukkitRunnable() {
                 @Override
                 public void run() {
-                    player.setInvulnerable(true);
                     plugin.getLogger().info("Teleporting " + player.getName() + " to " + waitingLobby);
                     player.teleport(waitingLobby);
                     plugin.getLogger().info("Teleport successful for " + player.getName());
@@ -555,7 +554,6 @@ public class BattlegroundManager {
                         currentLocation.getYaw(),
                         currentLocation.getPitch());
                 p.teleport(dropLocation);
-                p.setInvulnerable(true);
                 p.sendMessage(ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
                         + ChatColor.GREEN + "Bạn đang trong thời gian bất tử và rơi nhẹ!");
                 p.addPotionEffect(
@@ -577,7 +575,6 @@ public class BattlegroundManager {
                 if (countdown <= 0) {
                     for (Player p : participants) {
                         if (p.isOnline()) {
-                            p.setInvulnerable(false);
                             // SLOW_FALLING is kept until player lands naturally
                             p.sendMessage(
                                     ChatColor.GRAY + "[" + ChatColor.YELLOW + "BattleGround" + ChatColor.GRAY + "] "
@@ -695,6 +692,8 @@ public class BattlegroundManager {
             plugin.getLogger().warning("No match is running to end!");
             return;
         }
+        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "rg flag -w warp_wheat __global__ pvp deny");
+        plugin.getLogger().info("Set PvP to allow in warp_wheat");
         isRunning = false;
         String winnerName = winner != null ? winner.getName() : "None";
         String phaseReached = currentPhase <= 6 ? "Phase " + currentPhase : "Overtime";
