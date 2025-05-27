@@ -1746,6 +1746,8 @@ public class BattlegroundManager {
         try {
             String uuid = killer.getUniqueId().toString();
             String playerName = killer.getName();
+            killer.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 10, 2, false, false));
+            killer.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 10, 0, false, false));
             // Update match-specific kills
             int matchKills = kills.getOrDefault(killer, 0) + 1;
             kills.put(killer, matchKills);
@@ -1853,4 +1855,5 @@ public class BattlegroundManager {
             plugin.getLogger().info("Recorded death of " + player.getName() + " in death order");
         }
     }
+
 }
